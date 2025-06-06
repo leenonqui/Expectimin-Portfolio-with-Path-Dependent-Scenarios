@@ -1,7 +1,10 @@
 *.xlsx
 *.csv
-GIC_Scenarios_Probability/
 xlsx_to_csv.py
+
+GIC_Scenarios_Probability/
+
 venv/
+
 __pycache__/
 
