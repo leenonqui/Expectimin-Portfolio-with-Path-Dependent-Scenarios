@@ -17,7 +17,7 @@ NUM_MACRO_VARS = 2 # Real GDP Growth (per capita), Inflation (as per GIC paper)
 # GIC paper uses JST dataset from 1927-2015 and FRED from 2016-2019.
 # For this specific task (predicting 2015 using data up to 2014), we will primarily use JST.
 
-JST_FILE_PATH = '../usa_gdp_cpi.csv'
+JST_FILE_PATH = '../usa_macro_var_and_asset_returns.csv'
 FULL_MACRO_START_DATE = '1929' # As per GIC paper's JST data start
 FULL_MACRO_END_DATE = '2018' # End of training data for the 2019 prediction
 
@@ -117,12 +117,12 @@ print(f"Expected path vector dimension: {NUM_MACRO_VARS * SCENARIO_HORIZON_YEARS
 
 predicted_probabilities_over_time = [] # To store probabilities for the prediction year
 
-# Loop only for prediction_year_start = 2015
+# Loop only for prediction_year_start
 for prediction_year_start in [2019]:
-    
+
     # Define the training period end year (end of the year PRIOR to prediction_year_start)
-    training_end_year = prediction_year_start - 1  # This will be 2019 since we want to know the sce
-    
+    training_end_year = prediction_year_start - 1
+
     # Filter historical macro data for the current training window (1927 to training_end_year)
     current_training_macro_data = macro_var_df.loc[
         (macro_var_df.index >= pd.to_datetime(FULL_MACRO_START_DATE).year - 2) & (macro_var_df.index <= training_end_year)
@@ -247,3 +247,27 @@ predicted_probabilities_df = pd.DataFrame(predicted_probabilities_over_time).set
 print("\nPredicted Scenario Probabilities (2019 - based on GIC Paper Exact Methodology):")
 print(predicted_probabilities_df)
 
+    # --- 5. Asset Return Data
+# Create DataFrame to store Asset Returns Data
+asset_returns_df = pd.DataFrame()
+
+# Cash Returns and YoY Change (Interest Rate Change)
+asset_returns_df["Cash Total Return"] = historical_macro_data_full["bill_rate"] * 100
+asset_returns_df["Cash Real Return"] = asset_returns_df["Cash Total Return"] - macro_var_df["Inflation"]
+asset_returns_df["Interest Rate Change (Cash yoy Change)"] = asset_returns_df["Cash Total Return"].diff()
+
+# Stock Returns
+asset_returns_df["Stock Total Return"] = historical_macro_data_full["eq_tr"] * 100
+asset_returns_df["Stock Real Return"] = asset_returns_df["Stock Total Return"] - macro_var_df["Inflation"]
+asset_returns_df["Stock Excess Return"] = asset_returns_df["Stock Real Return"] - asset_returns_df["Cash Real Return"]
+
+# Bond Returns
+asset_returns_df["Bond Total Return"] = historical_macro_data_full["bond_tr"] * 100
+asset_returns_df["Bond Real Return"] = asset_returns_df["Bond Total Return"] - macro_var_df["Inflation"]
+asset_returns_df["Bond Excess Return"] = asset_returns_df["Bond Real Return"] - asset_returns_df["Cash Real Return"]
+
+# Remove NaN
+asset_returns_df.dropna(inplace=True)
+
+print(asset_returns_df.head())
+print(asset_returns_df.tail())
