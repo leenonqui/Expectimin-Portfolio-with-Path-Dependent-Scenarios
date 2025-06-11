@@ -251,11 +251,12 @@ print(predicted_probabilities_df)
     # --- 5. Asset Return Data ---
 # Create DataFrame to store Asset Returns Data
 asset_returns_df = pd.DataFrame()
+asset_returns_df.index = historical_macro_data_full.index
 
 # Cash Returns and YoY Change (Interest Rate Change)
 asset_returns_df["Cash Total Return"] = historical_macro_data_full["bill_rate"] * 100
 asset_returns_df["Cash Real Return"] = asset_returns_df["Cash Total Return"] - macro_var_df["Inflation"]
-asset_returns_df["Interest Rate Change (Cash yoy Change)"] = asset_returns_df["Cash Total Return"].diff()
+asset_returns_df["Interest Rate Change (Cash YoY Change)"] = asset_returns_df["Cash Total Return"].diff()
 
 # Stock Returns
 asset_returns_df["Stock Total Return"] = historical_macro_data_full["eq_tr"] * 100
@@ -276,7 +277,59 @@ print(asset_returns_df.tail())
     # --- 6. Create Path Vectors for Asset Return Data ---
 #create the 3 year paths for each Asset Class
 
-print(f"\n--- Predicting Asset Class Returns for {prediction_year_start} using training data up to {training_end_year} ---")
+asset_returns_prediction = []
 
-assets_historical_paths = []
+for prediction_year_start in [2020]:
 
+# Define the training period end year (end of the year PRIOR to prediction_year_start)
+    training_end_year = prediction_year_start - 1
+
+    current_training_asset_returns = asset_returns_df.iloc[
+        (asset_returns_df.index >= pd.to_datetime(FULL_MACRO_START_DATE).year - 2) & (asset_returns_df.index <= training_end_year)
+    ].copy()
+
+    if len(current_training_asset_returns) < SCENARIO_HORIZON_YEARS + 1:
+        print(f"Skipping {prediction_year_start}: Not enough training data before {training_end_year} to form sufficient paths.")
+        predicted_probabilities_over_time.append({
+            'year': prediction_year_start,
+            **{s_name: np.nan for s_name in gic_scenarios.keys()}
+        })
+        continue
+
+    print(f"\n--- Predicting Probabilities for {prediction_year_start} using training data up to {training_end_year} ---")
+
+    cash_historical_paths = []
+    stock_historical_paths = []
+    bond_historical_paths = []
+    num_training_years = len(current_training_asset_returns)
+
+    for i in range(num_training_years - SCENARIO_HORIZON_YEARS + 1):
+        path_segment = current_training_asset_returns.iloc[i : i + SCENARIO_HORIZON_YEARS]
+        cash_flattened_path = create_path_vector(
+            path_segment['Cash Total Return'].values,
+            path_segment['Cash Real Return'].values,
+            path_segment['Interest Rate Change (Cash YoY Change)'].values
+        )
+        cash_historical_paths.append(cash_flattened_path)
+        stock_flattened_path = create_path_vector(
+            path_segment['Stock Total Return'].values,
+            path_segment['Stock Real Return'].values,
+            path_segment['Stock Excess Return'].values
+        )
+        stock_historical_paths.append(stock_flattened_path)
+        bond_flattened_path = create_path_vector(
+            path_segment['Bond Total Return'].values,
+            path_segment['Bond Real Return'].values,
+            path_segment['Bond Excess Return'].values
+        )
+        bond_historical_paths.append(bond_flattened_path)
+
+# Transform paths into Arrays
+    cash_historical_paths_array = np.array(cash_historical_paths)
+    print(f"  Shape of current Historical Paths Array (all overlapping paths): {cash_historical_paths_array.shape}")
+
+    stock_historical_paths_array = np.array(stock_historical_paths)
+    print(f"  Shape of current Historical Paths Array (all overlapping paths): {stock_historical_paths_array.shape}")
+
+    bond_historical_paths_array = np.array(bond_historical_paths)
+    print(f"  Shape of current Historical Paths Array (all overlapping paths): {bond_historical_paths_array.shape}")
