@@ -1,25 +1,20 @@
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import mahalanobis
-from sklearn.covariance import LedoitWolf # For robust covariance estimation
 
-# --- Configuration Parameters ---
+# --- 1. Configuration Parameters ---
+
 SCENARIO_HORIZON_YEARS = 3
 PERIODS_PER_YEAR_IN_PATH = 1 # Annual data for paths
 TOTAL_SCENARIO_PERIODS = SCENARIO_HORIZON_YEARS * PERIODS_PER_YEAR_IN_PATH # This will be 3
 
 NUM_MACRO_VARS = 2 # Real GDP Growth (per capita), Inflation (as per GIC paper)
 
-# --- 1. Stock Selection (Conceptual - NO CODE HERE YET) ---
-# This script focuses solely on macro scenario probability prediction.
-
-# --- 2. Macroeconomic Data (ACTUAL JST DATA + FRED for recent years, as per GIC Paper) ---
-# GIC paper uses JST dataset from 1927-2015 and FRED from 2016-2019.
-# For this specific task (predicting 2015 using data up to 2014), we will primarily use JST.
+# --- 2. Macroeconomic Data (ACTUAL JST DATA) ---
 
 JST_FILE_PATH = '../usa_macro_var_and_asset_returns.csv'
-FULL_MACRO_START_DATE = '1929' # As per GIC paper's JST data start
-FULL_MACRO_END_DATE = '2018' # End of training data for the 2019 prediction
+FULL_MACRO_START_DATE = '1929' 
+FULL_MACRO_END_DATE = '2019' 
 
 # --- Load JST data ---
 try:
@@ -28,7 +23,7 @@ try:
     # Filter to desired range AFTER processing
     historical_macro_data_full = jst_raw_data.loc[
         (jst_raw_data.index >= pd.to_datetime(FULL_MACRO_START_DATE).year - SCENARIO_HORIZON_YEARS) &
-        (jst_raw_data.index <= pd.to_datetime(FULL_MACRO_END_DATE).year + 1)
+        (jst_raw_data.index <= pd.to_datetime(FULL_MACRO_END_DATE).year)
     ]
     
 except FileNotFoundError:
@@ -45,7 +40,7 @@ except Exception as e:
 
 macro_var_df = pd.DataFrame()
 macro_var_df.index = historical_macro_data_full.index
-macro_var_df['GDP Growth'] = historical_macro_data_full['gdp'].pct_change() * 100
+macro_var_df['GDP Growth'] = historical_macro_data_full['rgdpmad'].pct_change() * 100
 macro_var_df['Inflation'] = historical_macro_data_full['cpi'].pct_change() * 100
 
 # Drop rows with NaN values resulting from pct_change (typically the first year)
@@ -92,38 +87,38 @@ gic_scenarios = {
 }
 
 # Helper function to convert annual values to the flattened path vector
-def create_annual_path_vector(annual_gdp, annual_inflation):
+def create_path_vector(*args):
     """
-    Combines annual GDP and Inflation values into a flattened path vector
-    [GDP_Y1, INF_Y1, GDP_Y2, INF_Y2, GDP_Y3, INF_Y3].
+    Combines Macro values into a flattened path vector
+    ex: [GDP_Y1, GDP_Y2, GDP_Y3, INF_Y1, INF_Y2, INF_Y3, ...].
     """
     path_vector = []
-    for i in range(SCENARIO_HORIZON_YEARS):
-        path_vector.append(annual_gdp[i])
-        path_vector.append(annual_inflation[i])
+    for arg in args:
+        for i in range(SCENARIO_HORIZON_YEARS):
+            path_vector.append(arg[i])
     return np.array(path_vector)
 
 prospective_scenario_paths = {}
 for name, data in gic_scenarios.items():
-    path_vector = create_annual_path_vector(data["GDP Growth"], data["Inflation"])
+    path_vector = create_path_vector(data["GDP Growth"], data["Inflation"])
     prospective_scenario_paths[name] = path_vector
 
 print(f"\nExample prospective path vector shape: {prospective_scenario_paths['Baseline V'].shape}")
 print(f"Expected path vector dimension: {NUM_MACRO_VARS * SCENARIO_HORIZON_YEARS}")
 
 
-# --- 4. Probability Prediction for 2019 (Replication of GIC Paper's Method) ---
+    # --- 4. Probability Prediction for 2019 ---
 # Predict probabilities for the year 2019 only, using training data up to end of 2018.
 
 predicted_probabilities_over_time = [] # To store probabilities for the prediction year
 
 # Loop only for prediction_year_start
-for prediction_year_start in [2019]:
+for prediction_year_start in [2020]:
 
-    # Define the training period end year (end of the year PRIOR to prediction_year_start)
+# Define the training period end year (end of the year PRIOR to prediction_year_start)
     training_end_year = prediction_year_start - 1
 
-    # Filter historical macro data for the current training window (1927 to training_end_year)
+# Filter historical macro data for the current training window (1927 to training_end_year)
     current_training_macro_data = macro_var_df.loc[
         (macro_var_df.index >= pd.to_datetime(FULL_MACRO_START_DATE).year - 2) & (macro_var_df.index <= training_end_year)
     ].copy()
@@ -144,28 +139,27 @@ for prediction_year_start in [2019]:
     # --- 4.1. Historical Path Database Construction for current training window ---
     current_historical_paths = []
     num_training_years = len(current_training_macro_data)
-    
-    # Paths are P_t-2, P_t-1, P_t
-    # So, to get the path ending in training_end_year (e.g., 2014), we need data from 2012, 2013, 2014.
-    # The loop should go from the first possible start year up to the year that allows the last full path
-    # ending in training_end_year.
-    
-    # This loop generates all overlapping 3-year paths.
+
+# Paths are P_t-2, P_t-1, P_t
+# The loop should go from the first possible start year up to the year that allows the last full path
+ # ending in training_end_year.
+
+# This loop generates all overlapping 3-year paths.
+#    for i in range(0, num_training_years - SCENARIO_HORIZON_YEARS + 1, SCENARIO_HORIZON_YEARS):
     for i in range(num_training_years - SCENARIO_HORIZON_YEARS + 1):
         path_segment = current_training_macro_data.iloc[i : i + SCENARIO_HORIZON_YEARS]
-        flattened_path = create_annual_path_vector(
+        flattened_path = create_path_vector(
             path_segment['GDP Growth'].values,
             path_segment['Inflation'].values
         )
         current_historical_paths.append(flattened_path)
-    
+
     current_historical_paths_array = np.array(current_historical_paths)
     print(f"  Shape of current Historical Paths Array (all overlapping paths): {current_historical_paths_array.shape}")
 
     # --- 4.2. Covariance Matrix Estimation from CHANGES IN PATHS ---
-    # This is critical and directly follows the paper's description:
-    # "We computed the covariance matrix from the changes in the values of the economic variables
-    # from one three-year period to the next three-year period (in other words, the differences in the paths of the variables)."
+# "We computed the covariance matrix from the changes in the values of the economic variables
+# from one three-year period to the next three-year period (in other words, the differences in the paths of the variables)."
 
     if len(current_historical_paths_array) < 2:
         print(f"  Not enough historical paths ({len(current_historical_paths_array)}) to compute changes for covariance. Skipping.")
@@ -176,14 +170,18 @@ for prediction_year_start in [2019]:
         continue
 
     # Calculate differences between consecutive paths
-    delta_paths_array = np.diff(current_historical_paths_array, axis=0)
+#    delta_paths_array = np.diff(current_historical_paths_array, axis=0)
+    delta_paths = []
+    for i in range(num_training_years - SCENARIO_HORIZON_YEARS - 2):
+        delta_paths.append(current_historical_paths_array[i + SCENARIO_HORIZON_YEARS] - current_historical_paths_array[i])
+    delta_paths_array = np.array(delta_paths)
     print(f"  Shape of Delta Paths Array (differences between consecutive paths): {delta_paths_array.shape}")
 
     try:
-        lw_estimator = LedoitWolf()
         # Compute covariance of these *differences*
-        cov_matrix_historical_changes = lw_estimator.fit(delta_paths_array).covariance_
-        inv_cov_matrix_historical_changes = np.linalg.inv(cov_matrix_historical_changes)
+        cov_matrix_historical_changes = np.cov(delta_paths_array, rowvar=False)
+        inv_cov_matrix_historical_changes = np.linalg.pinv(cov_matrix_historical_changes)
+        print(f"  Inverse of Covariance Matrix: {inv_cov_matrix_historical_changes}")
     except Exception as e:
         print(f"  Error estimating covariance matrix from path differences for {prediction_year_start}: {e}. Skipping this year.")
         predicted_probabilities_over_time.append({
@@ -209,10 +207,12 @@ for prediction_year_start in [2019]:
         # Calculate Mahalanobis distance. scipy.spatial.distance.mahalanobis returns sqrt(d).
         # The paper's Equation 1 `d` is (x-y)'*Omega^-1*(x-y), which is the squared Mahalanobis distance.
         dist_scipy = mahalanobis(p_path, anchor_path_vector, inv_cov_matrix_historical_changes)
-        d_gic_paper = dist_scipy # Square it to match the paper's 'd' in Equation 1
+        d_gic_paper = dist_scipy**2 # Square it to match the paper's 'd' in Equation 1
+        print(f"  Perspective Scenario Path: {name};\n  Distance: {d_gic_paper}") 
 
         # Calculate likelihood using the GIC paper's Equation 2: Likelihood ∝ e^(-d/2)
         likelihood = np.exp(-d_gic_paper / 2.0)
+        print(f"  Likelihood: {likelihood}")
         current_scenario_likelihoods[name] = likelihood
 
     valid_likelihoods = {k: v for k, v in current_scenario_likelihoods.items() if not np.isinf(v) and not np.isnan(v)}
@@ -227,6 +227,7 @@ for prediction_year_start in [2019]:
 
     # Normalize likelihoods to sum to 1 to get probabilities
     total_likelihood = sum(valid_likelihoods.values())
+    print(f"  Total Likelihood: {total_likelihood}")
     
     current_scenario_probabilities = {}
     if total_likelihood == 0: 
@@ -247,7 +248,7 @@ predicted_probabilities_df = pd.DataFrame(predicted_probabilities_over_time).set
 print("\nPredicted Scenario Probabilities (2019 - based on GIC Paper Exact Methodology):")
 print(predicted_probabilities_df)
 
-    # --- 5. Asset Return Data
+    # --- 5. Asset Return Data ---
 # Create DataFrame to store Asset Returns Data
 asset_returns_df = pd.DataFrame()
 
@@ -271,3 +272,11 @@ asset_returns_df.dropna(inplace=True)
 
 print(asset_returns_df.head())
 print(asset_returns_df.tail())
+
+    # --- 6. Create Path Vectors for Asset Return Data ---
+#create the 3 year paths for each Asset Class
+
+print(f"\n--- Predicting Asset Class Returns for {prediction_year_start} using training data up to {training_end_year} ---")
+
+assets_historical_paths = []
+
