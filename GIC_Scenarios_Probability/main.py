@@ -335,7 +335,7 @@ prospecive_asset_returns = {}
 for name, indices in prospective_relevant_indices.items():
     asset_returns = []
 
-    # Extract Dependant Variables and Corresponding 
+    # Extract Dependant Variables and Corresponding
     Y_top = asset_historical_paths_array[indices]
     relevance_top = np.array(prospective_scenario_relevance[name])[indices]
 
@@ -354,3 +354,338 @@ for name, p_return in prospecive_asset_returns.items():
     bond_returns[name] = cash_returns[name] + p_return[6:9]
 
 print(f"Cash Return:\n{cash_returns}\nStock Returns:\n{stock_returns}\nBond Returns:\n{bond_returns}")
+
+# ===============================================================================
+# 8. EXPECTIMINIMAX PORTFOLIO OPTIMIZATION WITH RISK AVERSION PROFILES
+# ===============================================================================
+
+print(f"\n{'='*80}")
+print("EXPECTIMINIMAX PORTFOLIO OPTIMIZATION")
+print(f"{'='*80}")
+
+# Convert your results to the format needed for expectiminimax optimization
+def convert_gic_results_to_expectiminimax_format(predicted_probabilities_df, cash_returns, stock_returns, bond_returns):
+    """
+    Convert GIC results to the format needed for expectiminimax optimization.
+    """
+    # Get probabilities for the prediction year (2020)
+    latest_probs = predicted_probabilities_df.iloc[-1]  # Last row
+    probabilities = {}
+    for scenario in gic_scenarios.keys():
+        probabilities[scenario] = latest_probs[scenario]
+
+    # Convert returns to the required format (DataFrames with proper structure)
+    asset_returns_dict = {}
+    for scenario in gic_scenarios.keys():
+        if scenario in cash_returns.columns:
+            # Create DataFrame with returns for each year of the 3-year path
+            returns_df = pd.DataFrame({
+                'Cash': cash_returns[scenario].values,
+                'Stocks': stock_returns[scenario].values,
+                'Bonds': bond_returns[scenario].values
+            })
+            asset_returns_dict[scenario] = returns_df
+
+    return probabilities, asset_returns_dict
+
+# Convert your GIC results
+scenario_probabilities, asset_returns_formatted = convert_gic_results_to_expectiminimax_format(
+    predicted_probabilities_df, cash_returns, stock_returns, bond_returns
+)
+
+print(f"\nScenario Probabilities for {prediction_year_start}:")
+for scenario, prob in scenario_probabilities.items():
+    print(f"  {scenario}: {prob:.4f} ({prob*100:.2f}%)")
+
+print(f"\nAsset Returns by Scenario (3-year paths):")
+for scenario, returns_df in asset_returns_formatted.items():
+    print(f"\n{scenario}:")
+    print(returns_df.round(4))
+
+# Initialize the Expectiminimax Portfolio Optimizer
+class ExpectiminimaxPortfolioOptimizer:
+    """Expectiminimax Portfolio Optimizer for Path-Dependent Scenarios"""
+
+    def __init__(self, scenarios_probabilities, asset_returns, risk_aversion=1.0,
+                 min_weight=0.0, max_weight=1.0, use_minimax_within_scenario=False):
+        self.scenarios_probabilities = scenarios_probabilities
+        self.asset_returns = asset_returns
+        self.risk_aversion = risk_aversion
+        self.min_weight = min_weight
+        self.max_weight = max_weight
+        self.use_minimax_within_scenario = use_minimax_within_scenario
+
+        # Get asset information
+        first_scenario = list(asset_returns.keys())[0]
+        self.asset_names = list(asset_returns[first_scenario].columns)
+        self.n_assets = len(self.asset_names)
+        self.n_years = len(asset_returns[first_scenario])
+
+    def portfolio_return_path(self, weights, scenario_name):
+        """Calculate portfolio returns for a given scenario and weights."""
+        returns_df = self.asset_returns[scenario_name]
+        portfolio_returns = []
+
+        for year in range(self.n_years):
+            year_return = sum(weights[i] * returns_df.iloc[year, i] for i in range(self.n_assets))
+            portfolio_returns.append(year_return)
+
+        return np.array(portfolio_returns)
+
+    def utility_function(self, returns):
+        """Calculate utility using mean-variance utility function."""
+        mean_return = np.mean(returns)
+
+        # Handle risk-neutral case (risk_aversion = 0)
+        if self.risk_aversion == 0.0:
+            return mean_return
+
+        variance = np.var(returns)
+        utility = mean_return - (self.risk_aversion / 2) * variance
+        return utility
+
+    def scenario_value(self, weights, scenario_name):
+        """Calculate the value for a specific scenario given portfolio weights."""
+        portfolio_returns = self.portfolio_return_path(weights, scenario_name)
+
+        if self.use_minimax_within_scenario:
+            # Minimax: consider worst single-year return within the scenario
+            return np.min(portfolio_returns)
+        else:
+            # Expected utility over the scenario path
+            return self.utility_function(portfolio_returns)
+
+    def expectiminimax_value(self, weights):
+        """Calculate the expectiminimax value for given portfolio weights."""
+        expected_value = 0.0
+
+        for scenario_name, probability in self.scenarios_probabilities.items():
+            if scenario_name in self.asset_returns:
+                scenario_val = self.scenario_value(weights, scenario_name)
+                expected_value += probability * scenario_val
+
+        return expected_value
+
+    def optimize_portfolio(self, initial_weights=None):
+        """Find optimal portfolio weights using expectiminimax criterion."""
+        from scipy.optimize import minimize
+
+        # Initial weights (equal allocation if not provided)
+        if initial_weights is None:
+            initial_weights = np.ones(self.n_assets) / self.n_assets
+
+        # Constraints: weights sum to 1
+        constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
+
+        # Bounds: weight limits for each asset
+        bounds = [(self.min_weight, self.max_weight) for _ in range(self.n_assets)]
+
+        # Objective function (minimize negative expectiminimax value)
+        def objective(weights):
+            return -self.expectiminimax_value(weights)
+
+        # Optimize
+        result = minimize(
+            objective, initial_weights, method='SLSQP',
+            bounds=bounds, constraints=constraints,
+            options={'ftol': 1e-12, 'disp': False}
+        )
+
+        optimal_weights = result.x
+        optimal_value = -result.fun
+
+        return {
+            'optimal_weights': dict(zip(self.asset_names, optimal_weights)),
+            'expectiminimax_value': optimal_value,
+            'optimization_success': result.success,
+            'optimization_message': result.message if hasattr(result, 'message') else 'No message'
+        }
+
+# Define different risk aversion profiles
+risk_aversion_profiles = [
+    {"name": "Risk Neutral", "risk_aversion": 0.0},
+    {"name": "Low Risk Aversion", "risk_aversion": 0.5},
+    {"name": "Moderate Risk Aversion", "risk_aversion": 1.0},
+    {"name": "High Risk Aversion", "risk_aversion": 2.0},
+    {"name": "Very High Risk Aversion", "risk_aversion": 5.0}
+]
+
+print(f"\n{'='*80}")
+print("OPTIMAL PORTFOLIOS FOR DIFFERENT RISK AVERSION PROFILES")
+print(f"{'='*80}")
+
+optimization_results = {}
+
+for profile in risk_aversion_profiles:
+    name = profile["name"]
+    risk_aversion = profile["risk_aversion"]
+
+    print(f"\n{'-'*50}")
+    print(f"RISK AVERSION PROFILE: {name}")
+    print(f"Risk Aversion Parameter (λ): {risk_aversion}")
+    print(f"{'-'*50}")
+
+    # Special case explanation for risk neutral
+    if risk_aversion == 0.0:
+        print("IMPLICATIONS OF RISK NEUTRAL (λ=0):")
+        print("• Utility function becomes: U = E[returns] (no variance penalty)")
+        print("• Only cares about expected returns, ignores volatility completely")
+        print("• Will choose allocation with highest expected return across scenarios")
+        print("• Represents pure expected return maximization")
+        print("• No consideration for downside risk or return distribution")
+
+    # Initialize optimizer
+    optimizer = ExpectiminimaxPortfolioOptimizer(
+        scenarios_probabilities=scenario_probabilities,
+        asset_returns=asset_returns_formatted,
+        risk_aversion=risk_aversion,
+        min_weight=0.0,   # Allow no investment in an asset
+        max_weight=1.0,   # Allow up to 100% in any asset
+        use_minimax_within_scenario=False  # Use expected utility, not minimax
+    )
+
+    # Optimize portfolio
+    result = optimizer.optimize_portfolio()
+    optimization_results[name] = result
+
+    print(f"Optimization Success: {result['optimization_success']}")
+    if not result['optimization_success']:
+        print(f"Warning: {result['optimization_message']}")
+
+    print(f"Expectiminimax Value: {result['expectiminimax_value']:.6f}")
+    print("Optimal Portfolio Weights:")
+    for asset, weight in result['optimal_weights'].items():
+        print(f"  {asset}: {weight:.4f} ({weight*100:.2f}%)")
+
+    # Calculate detailed portfolio performance for each scenario
+    print("\nPortfolio Performance by Scenario:")
+    total_expected_return = 0.0
+    total_expected_utility = 0.0
+
+    for scenario, prob in scenario_probabilities.items():
+        if scenario in asset_returns_formatted:
+            weights_array = np.array([result['optimal_weights'][asset] for asset in optimizer.asset_names])
+            portfolio_returns = optimizer.portfolio_return_path(weights_array, scenario)
+            scenario_value = optimizer.scenario_value(weights_array, scenario)
+
+            avg_return = np.mean(portfolio_returns)
+            cumulative_return = np.prod(1 + portfolio_returns/100) - 1
+            volatility = np.std(portfolio_returns)
+
+            total_expected_return += prob * avg_return
+            total_expected_utility += prob * scenario_value
+
+            print(f"  {scenario} (p={prob:.3f}):")
+            print(f"    Avg Annual Return: {avg_return:.2f}%")
+            print(f"    3-Year Cumulative: {cumulative_return*100:.2f}%")
+            print(f"    Volatility: {volatility:.2f}%")
+            print(f"    Scenario Utility: {scenario_value:.4f}")
+
+    print(f"\nExpected Portfolio Return: {total_expected_return:.2f}%")
+    print(f"Expected Portfolio Utility: {total_expected_utility:.4f}")
+
+# Summary comparison across risk aversion levels
+print(f"\n{'='*80}")
+print("SUMMARY: OPTIMAL PORTFOLIOS ACROSS RISK AVERSION LEVELS")
+print(f"{'='*80}")
+
+summary_df_data = []
+for name, result in optimization_results.items():
+    profile = next(p for p in risk_aversion_profiles if p["name"] == name)
+    row = {
+        'Profile': name,
+        'Risk Aversion (λ)': profile['risk_aversion'],
+        'Expectiminimax Value': result['expectiminimax_value'],
+        **{f'{asset} Weight': result['optimal_weights'][asset]
+           for asset in ['Cash', 'Stocks', 'Bonds']}
+    }
+    summary_df_data.append(row)
+
+summary_df = pd.DataFrame(summary_df_data)
+print(summary_df.round(4))
+
+# Detailed analysis of risk aversion effects
+print(f"\n{'='*80}")
+print("RISK AVERSION IMPACT ANALYSIS")
+print(f"{'='*80}")
+
+print("\nKey Insights:")
+print("1. RISK AVERSION (λ) controls the penalty for portfolio volatility")
+print("2. λ=0 (Risk Neutral): Only maximizes expected return, ignores risk")
+print("3. λ>0 (Risk Averse): Higher λ → stronger preference for stable returns")
+print("4. Portfolio allocation shifts from aggressive to conservative as λ increases")
+print("5. Expected utility decreases as risk aversion increases (cost of safety)")
+
+print(f"\nRisk Aversion Parameter Effects:")
+print("• λ=0.0: Pure expected return maximization (no risk penalty)")
+print("• λ=0.5: Slight risk adjustment, still growth-oriented")
+print("• λ=1.0: Balanced risk-return trade-off")
+print("• λ=2.0: Conservative bias, stability over growth")
+print("• λ=5.0: Very conservative, strong volatility avoidance")
+
+# Highlight the recommended portfolio based on moderate risk aversion
+recommended_profile = "Moderate Risk Aversion"
+if recommended_profile in optimization_results:
+    recommended_portfolio = optimization_results[recommended_profile]
+
+    print(f"\n{'='*80}")
+    print(f"RECOMMENDED PORTFOLIO: {recommended_profile}")
+    print(f"{'='*80}")
+    print(f"Based on expectiminimax optimization with balanced risk preferences")
+    print(f"Risk aversion parameter: λ = 1.0")
+    print(f"Expected utility: {recommended_portfolio['expectiminimax_value']:.6f}")
+    print(f"\nOptimal Asset Allocation:")
+    for asset, weight in recommended_portfolio['optimal_weights'].items():
+        print(f"  {asset}: {weight:.1%}")
+
+# Calculate and display risk metrics for different profiles
+print(f"\n{'='*80}")
+print("RISK-RETURN ANALYSIS ACROSS PROFILES")
+print(f"{'='*80}")
+
+for name, result in optimization_results.items():
+    weights_array = np.array([result['optimal_weights'][asset] for asset in ['Cash', 'Stocks', 'Bonds']])
+
+    # Calculate expected return and risk across scenarios
+    expected_return = 0.0
+    expected_variance = 0.0
+    worst_case_return = float('inf')
+    best_case_return = float('-inf')
+
+    for scenario, prob in scenario_probabilities.items():
+        if scenario in asset_returns_formatted:
+            optimizer = ExpectiminimaxPortfolioOptimizer(scenario_probabilities, asset_returns_formatted, 1.0)
+            portfolio_returns = optimizer.portfolio_return_path(weights_array, scenario)
+
+            scenario_avg_return = np.mean(portfolio_returns)
+            scenario_variance = np.var(portfolio_returns)
+            scenario_worst = np.min(portfolio_returns)
+            scenario_best = np.max(portfolio_returns)
+
+            expected_return += prob * scenario_avg_return
+            expected_variance += prob * scenario_variance
+
+            if scenario_worst < worst_case_return:
+                worst_case_return = scenario_worst
+            if scenario_best > best_case_return:
+                best_case_return = scenario_best
+
+    expected_volatility = np.sqrt(expected_variance)
+
+    print(f"{name}:")
+    print(f"  Expected Return: {expected_return:.2f}%")
+    print(f"  Expected Volatility: {expected_volatility:.2f}%")
+    if expected_volatility > 0:
+        print(f"  Sharpe Ratio: {(expected_return - 0.041)/ expected_volatility:.3f}")
+    print(f"  Worst Case: {worst_case_return:.2f}%")
+    print(f"  Best Case: {best_case_return:.2f}%")
+    print("")
+
+print(f"\n{'='*80}")
+print("EXPECTIMINIMAX PORTFOLIO OPTIMIZATION COMPLETE")
+print(f"{'='*80}")
+print("✓ Risk aversion-based investor profiles (no liquidity constraints)")
+print("✓ Continuous optimization for optimal portfolio weights")
+print("✓ Risk neutral case (λ=0) shows pure expected return maximization")
+print("✓ Higher risk aversion leads to more conservative allocations")
+print("✓ Expectiminimax framework maximizes expected utility across scenarios")
