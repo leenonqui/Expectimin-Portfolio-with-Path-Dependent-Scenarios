@@ -16,7 +16,7 @@ def basic_example():
     print("="*40)
 
     # Step 1: Initialize analyzer
-    analyzer = GICAnalyzer("../data/usa_macro_var_and_asset_returns.csv")
+    analyzer = GICAnalyzer("data/usa_macro_var_and_asset_returns.csv")
 
     # Step 2: Run analysis
     print("Running GIC analysis...")
@@ -42,6 +42,8 @@ def basic_example():
         print(f"  {asset}: {weight:.1%}")
 
     print(f"\nExpected Utility: {portfolio.expectiminimax_value:.4f}")
+    print(f"Expected Return: {portfolio.expected_return:.2f}% (over 3 years)")
+    print(f"Expected Volatility: {portfolio.expected_volatility:.2f}%")
 
 if __name__ == "__main__":
     basic_example()

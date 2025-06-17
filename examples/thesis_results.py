@@ -26,7 +26,7 @@ def main():
     print("="*80)
 
     # Initialize analyzer with JST data
-    data_path = "../data/usa_macro_var_and_asset_returns.csv"
+    data_path = "data/usa_macro_var_and_asset_returns.csv"
     analyzer = GICAnalyzer(data_path)
 
     print(f"\n1. LOADING DATA")

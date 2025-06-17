@@ -108,8 +108,9 @@ class PartialSampleRegression:
             relevance = (sim_i + info_i)
 
             # Weighted contribution to forecast
-            weighted_sum += relevance * (Y_top[i] - Y_mean)
+            weighted_sum += (relevance * (Y_top[i] - Y_mean))
 
         # Final forecast calculation
-        forecast = Y_mean + (1/2*n)*weighted_sum
+        forecast = Y_mean + (weighted_sum / (2*n))
+
         return forecast

@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from typing import Dict
+from typing import Dict, List
 from ..data.loader import DataLoader
 from ..utils.math_utils import create_path_vector
 from .partial_sample_regression import PartialSampleRegression
@@ -102,30 +102,22 @@ class GICAssetForecasting:
         self.macro_paths = np.array(macro_paths)
         self.asset_paths = np.array(asset_paths)
 
-    def _convert_to_return_levels(self,
-                                 asset_forecast: np.ndarray,
-                                 base_cash_level: float) -> Dict[str, List[float]]:
-        """
-        Convert forecasted asset path to actual return levels
+    def _convert_to_return_levels(self, asset_forecast: np.ndarray, base_cash_level: float):
+        """Build forward path from current levels using forecasted changes"""
 
-        Asset forecast structure: [Cash_YoY_1, Cash_YoY_2, Cash_YoY_3,
-                                  Stock_Excess_1, Stock_Excess_2, Stock_Excess_3,
-                                  Bond_Excess_1, Bond_Excess_2, Bond_Excess_3]
-        """
-
-        # Extract components from forecast
-        cash_changes = asset_forecast[:3]
+        cash_changes = asset_forecast[:3]  # These are YoY changes
         stock_excess = asset_forecast[3:6]
         bond_excess = asset_forecast[6:9]
 
-        # Calculate cumulative cash returns
+        # Build the path forward from current interest rate level
         cash_returns = []
-        current_cash = base_cash_level
-        for change in cash_changes:
-            current_cash += change
-            cash_returns.append(current_cash)
+        current_level = base_cash_level
 
-        # Calculate total stock and bond returns
+        for change in cash_changes:
+            current_level += change  # Add forecasted change
+            cash_returns.append(current_level)
+
+        # Add premiums to get stock/bond returns
         stock_returns = [cash_returns[i] + stock_excess[i] for i in range(3)]
         bond_returns = [cash_returns[i] + bond_excess[i] for i in range(3)]
 

@@ -1,4 +1,3 @@
-
 import pandas as pd
 import numpy as np
 from typing import Tuple
@@ -21,9 +20,27 @@ class DataLoader:
         if end_year is None:
             end_year = int(FULL_MACRO_END_DATE)
 
-        # Load raw data
+        # Load raw data with proper separator and handling
         try:
-            self._raw_data = pd.read_csv(self.file_path, index_col='year')
+            # Load with semicolon separator and year index
+            self._raw_data = pd.read_csv(
+                self.file_path,
+                sep=';',
+                index_col='year'
+            )
+
+            # Clean up column names (remove any extra spaces)
+            self._raw_data.columns = self._raw_data.columns.str.strip()
+
+            # Convert European decimal notation (comma) to standard (dot)
+            numeric_columns = ['rgdpmad', 'cpi', 'eq_tr', 'bond_tr', 'bill_rate']
+            for col in numeric_columns:
+                if col in self._raw_data.columns and self._raw_data[col].dtype == 'object':
+                    self._raw_data[col] = pd.to_numeric(
+                        self._raw_data[col].astype(str).str.replace(',', '.'),
+                        errors='coerce'
+                    )
+
         except FileNotFoundError:
             raise FileNotFoundError(f"Data file not found: {self.file_path}")
         except Exception as e:
@@ -58,44 +75,43 @@ class DataLoader:
         # Inflation (percentage change in CPI)
         macro_df['Inflation'] = raw_data[JST_COLUMNS['inflation']].pct_change() * 100
 
-        # Remove NaN values
+        # Remove NaN values (first row will be NaN due to pct_change)
         macro_df.dropna(inplace=True)
 
         return macro_df
 
     def _process_asset_data(self, raw_data: pd.DataFrame, macro_data: pd.DataFrame) -> pd.DataFrame:
-        """Process asset return data"""
+        """Process asset return data - FIXED VERSION"""
         asset_df = pd.DataFrame(index=raw_data.index)
 
-        # Convert to percentages
-        cash_total = raw_data[JST_COLUMNS['cash']] * 100
-        stock_total = raw_data[JST_COLUMNS['stocks']] * 100
-        bond_total = raw_data[JST_COLUMNS['bonds']] * 100
+        # FIXED: Don't multiply by 100, and handle real rates properly
+        # The JST bill_rate might already be in the right units
+        cash_nominal = raw_data[JST_COLUMNS['cash']]  # Keep as decimal
+        stock_total = raw_data[JST_COLUMNS['stocks']]  # Keep as decimal
+        bond_total = raw_data[JST_COLUMNS['bonds']]    # Keep as decimal
 
-        # Calculate real returns
-        inflation = macro_data['Inflation']
-        cash_real = cash_total - inflation
-        stock_real = stock_total - inflation
-        bond_real = bond_total - inflation
+        # Convert inflation to decimal (it's calculated as percentage)
+        inflation_decimal = macro_data['Inflation'] / 100  # Convert % to decimal
+
+        # Calculate real returns - OPTION 1: Subtract inflation
+        cash_real = (cash_nominal) * 100  # Convert back to %
+        stock_real = (stock_total - inflation_decimal) * 100
+        bond_real = (bond_total - inflation_decimal) * 100
+
+        # OR OPTION 2: If bill_rate is already real, use directly
+        # cash_real = cash_nominal * 100  # Just convert to percentage
+        # stock_real = stock_total * 100
+        # bond_real = bond_total * 100
 
         # Asset variables for regression
-        temp = np.zeros(cash_real.diff().shape)
-        for i in range(len(temp)):
-            if i == 0:
-                temp[i] = cash_real[-1]
-            else:
-                temp[i] = temp[i-1] + cash_real.diff()[i]
-
-        asset_df['Cash_YoY_Change'] = temp
+        asset_df['Cash_YoY_Change'] = cash_real.diff()
         asset_df['Stock_Excess'] = stock_real - cash_real
         asset_df['Bond_Excess'] = bond_real - cash_real
 
-        # Store levels for final calculations
+        # Store levels
         asset_df['Cash_Real_Level'] = cash_real
         asset_df['Stock_Real_Level'] = stock_real
         asset_df['Bond_Real_Level'] = bond_real
 
-        # Remove NaN values
         asset_df.dropna(inplace=True)
-
         return asset_df
