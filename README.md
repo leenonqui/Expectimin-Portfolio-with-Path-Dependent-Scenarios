@@ -134,4 +134,4 @@ year,rgdpmad,cpi,bill_rate,eq_tr,bond_tr
 
 See the `examples/` directory for:
 - `basic_usage.py`: Simple workflow example
-- `replicate_thesis_results.
+- `replicate_thesis_results`.
