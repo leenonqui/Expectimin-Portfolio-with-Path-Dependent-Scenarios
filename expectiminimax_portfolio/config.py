@@ -1,8 +1,6 @@
-
 """
-Configuration constants for GIC methodology and expectiminimax optimization
-
 All scenarios and parameters are based on Kritzman et al. (2021) Table 1
+includes liquidity preference as minimum cash allocation constraint
 """
 
 # Scenario Analysis Parameters
@@ -52,6 +50,31 @@ RISK_AVERSION_PROFILES = [
     {"name": "Moderate Risk Aversion", "risk_aversion": 1.0},
     {"name": "High Risk Aversion", "risk_aversion": 2.0},
     {"name": "Very High Risk Aversion", "risk_aversion": 5.0}
+]
+
+# NEW: Liquidity Preference Profiles
+# Defines minimum cash allocation as percentage (0-10%)
+LIQUIDITY_PREFERENCE_PROFILES = [
+    {"name": "No Liquidity Preference", "min_cash_pct": 0.0, "description": "No minimum cash requirement"},
+    {"name": "Minimal Liquidity", "min_cash_pct": 0.02, "description": "2% minimum cash for transactions"},
+    {"name": "Low Liquidity Preference", "min_cash_pct": 0.05, "description": "5% minimum cash buffer"},
+    {"name": "Moderate Liquidity Preference", "min_cash_pct": 0.08, "description": "8% minimum cash for opportunities"},
+    {"name": "High Liquidity Preference", "min_cash_pct": 0.10, "description": "10% minimum cash for security"}
+]
+
+# Combined Risk-Liquidity Profiles (inspired by GIC examples)
+COMBINED_PROFILES = [
+    # Growth-oriented profiles (low risk aversion)
+    {"name": "Aggressive Growth", "risk_aversion": 0.0, "min_cash_pct": 0.00},
+    {"name": "Growth with Safety Net", "risk_aversion": 0.5, "min_cash_pct": 0.02},
+
+    # Balanced profiles (moderate risk aversion)
+    {"name": "Balanced", "risk_aversion": 1.0, "min_cash_pct": 0.05},
+    {"name": "Balanced Conservative", "risk_aversion": 1.0, "min_cash_pct": 0.08},
+
+    # Conservative profiles (high risk aversion)
+    {"name": "Conservative", "risk_aversion": 2.0, "min_cash_pct": 0.08},
+    {"name": "Very Conservative", "risk_aversion": 5.0, "min_cash_pct": 0.10}
 ]
 
 # Asset Classes

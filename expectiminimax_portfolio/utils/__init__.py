@@ -1,4 +1,3 @@
-
 """
 Mathematical utilities and helper functions
 """
@@ -11,10 +10,13 @@ from .math_utils import (
     scenario_likelihood
 )
 
+from .liquidity_utils import LiquidityAnalyzer
+
 __all__ = [
     'similarity',
     'informativeness',
     'create_path_vector',
     'mahalanobis_distance_squared',
-    'scenario_likelihood'
+    'scenario_likelihood',
+    'LiquidityAnalyzer'
 ]

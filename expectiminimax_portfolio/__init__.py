@@ -1,12 +1,14 @@
-
 """
-Expectiminimax Portfolio Optimization with Path-Dependent Scenarios
+Expectiminimax Portfolio Optimization with Path-Dependent Scenarios and Liquidity Preferences
 
 This package implements the GIC methodology for scenario analysis and
-expectiminimax framework for portfolio optimization as described in:
+expectiminimax framework for portfolio optimization with enhanced liquidity preferences.
 
+Based on:
 Kritzman, M., Li, D., Qiu, G., & Turkington, D. (2021).
 "Portfolio Choice with Path-Dependent Scenarios."
+
+Enhanced with liquidity preference constraints as minimum cash allocation bounds.
 """
 
 from .gic_methodology.scenario_probability import GICScenarioProbability
@@ -15,7 +17,7 @@ from .portfolio_optimization.expectiminimax import ExpectiminimaxOptimizer
 from .models.scenario import EconomicScenario, AssetReturns
 from .models.portfolio import OptimizationResult
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Your Name"
 
 class GICAnalyzer:

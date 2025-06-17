@@ -2,15 +2,16 @@ import numpy as np
 from scipy.optimize import minimize
 from typing import Dict, List, Optional
 from ..models.portfolio import OptimizationResult
-from ..config import RISK_AVERSION_PROFILES, ASSET_CLASSES
+from ..config import RISK_AVERSION_PROFILES, ASSET_CLASSES, LIQUIDITY_PREFERENCE_PROFILES, COMBINED_PROFILES
 
 class ExpectiminimaxOptimizer:
     """
-    Expectiminimax Portfolio Optimizer for Path-Dependent Scenarios
+    Enhanced Expectiminimax Portfolio Optimizer with Liquidity Preferences
 
-    Implements expectiminimax criterion:
+    Implements expectiminimax criterion with liquidity constraints:
     - Maximizes expected utility across scenarios
     - Uses mean-variance utility function with risk aversion parameter
+    - Supports minimum cash allocation (liquidity preference)
     - Supports multiple risk aversion profiles
     """
 
@@ -32,17 +33,29 @@ class ExpectiminimaxOptimizer:
         self.n_assets = len(ASSET_CLASSES)
         self.n_years = 3  # 3-year scenarios
 
-    def optimize_single_profile(self, risk_aversion: float) -> OptimizationResult:
-        """Optimize portfolio for single risk aversion profile"""
+    def optimize_single_profile(self,
+                               risk_aversion: float,
+                               min_cash_pct: float = 0.0) -> OptimizationResult:
+        """
+        Optimize portfolio for single risk aversion profile with liquidity preference
 
-        # Initial weights (equal allocation)
-        initial_weights = np.ones(self.n_assets) / self.n_assets
+        Args:
+            risk_aversion: Risk aversion parameter (λ)
+            min_cash_pct: Minimum cash allocation as percentage (0.0-0.10)
+        """
+
+        # Initial weights (equal allocation, respecting cash minimum)
+        if min_cash_pct > 0:
+            remaining_weight = 1.0 - min_cash_pct
+            initial_weights = np.array([min_cash_pct, remaining_weight/2, remaining_weight/2])
+        else:
+            initial_weights = np.ones(self.n_assets) / self.n_assets
 
         # Constraints: weights sum to 1
         constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
 
-        # Bounds: weight limits for each asset
-        bounds = [(self.min_weight, self.max_weight) for _ in range(self.n_assets)]
+        # Enhanced bounds with liquidity preference
+        bounds = self._create_bounds_with_liquidity(min_cash_pct)
 
         # Objective function (minimize negative expectiminimax value)
         def objective(weights):
@@ -64,6 +77,7 @@ class ExpectiminimaxOptimizer:
         return OptimizationResult(
             risk_profile="Custom",
             risk_aversion=risk_aversion,
+            min_cash_pct=min_cash_pct,
             optimal_weights=dict(zip(ASSET_CLASSES, optimal_weights)),
             expectiminimax_value=optimal_value,
             expected_return=expected_return,
@@ -80,11 +94,83 @@ class ExpectiminimaxOptimizer:
             name = profile["name"]
             risk_aversion = profile["risk_aversion"]
 
-            result = self.optimize_single_profile(risk_aversion)
+            result = self.optimize_single_profile(risk_aversion, min_cash_pct=0.0)
             result.risk_profile = name
             results[name] = result
 
         return results
+
+    def optimize_liquidity_profiles(self) -> Dict[str, OptimizationResult]:
+        """Optimize portfolios for all liquidity preference profiles (with moderate risk aversion)"""
+
+        results = {}
+        moderate_risk_aversion = 1.0  # Use moderate risk aversion as baseline
+
+        for profile in LIQUIDITY_PREFERENCE_PROFILES:
+            name = profile["name"]
+            min_cash_pct = profile["min_cash_pct"]
+
+            result = self.optimize_single_profile(moderate_risk_aversion, min_cash_pct)
+            result.risk_profile = name
+            results[name] = result
+
+        return results
+
+    def optimize_combined_profiles(self) -> Dict[str, OptimizationResult]:
+        """Optimize portfolios for combined risk-liquidity profiles"""
+
+        results = {}
+
+        for profile in COMBINED_PROFILES:
+            name = profile["name"]
+            risk_aversion = profile["risk_aversion"]
+            min_cash_pct = profile["min_cash_pct"]
+
+            result = self.optimize_single_profile(risk_aversion, min_cash_pct)
+            result.risk_profile = name
+            results[name] = result
+
+        return results
+
+    def optimize_liquidity_sensitivity(self,
+                                     risk_aversion: float = 1.0,
+                                     liquidity_range: List[float] = None) -> Dict[str, OptimizationResult]:
+        """
+        Analyze sensitivity to liquidity preferences for given risk aversion
+
+        Args:
+            risk_aversion: Fixed risk aversion parameter
+            liquidity_range: List of minimum cash percentages to test
+        """
+
+        if liquidity_range is None:
+            liquidity_range = [0.0, 0.02, 0.05, 0.08, 0.10]  # 0% to 10%
+
+        results = {}
+
+        for min_cash_pct in liquidity_range:
+            name = f"Liquidity_{min_cash_pct*100:.0f}%"
+
+            result = self.optimize_single_profile(risk_aversion, min_cash_pct)
+            result.risk_profile = name
+            results[name] = result
+
+        return results
+
+    def _create_bounds_with_liquidity(self, min_cash_pct: float) -> List[tuple]:
+        """Create bounds with liquidity preference constraint"""
+
+        bounds = []
+
+        for i, asset in enumerate(ASSET_CLASSES):
+            if asset == "Cash":
+                # Cash has minimum allocation based on liquidity preference
+                bounds.append((min_cash_pct, self.max_weight))
+            else:
+                # Other assets have standard bounds
+                bounds.append((self.min_weight, self.max_weight))
+
+        return bounds
 
     def _expectiminimax_value(self, weights: np.ndarray, risk_aversion: float) -> float:
         """Calculate expectiminimax value for given weights and risk aversion"""
