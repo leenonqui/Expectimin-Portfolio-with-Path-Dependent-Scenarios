@@ -11,6 +11,9 @@ setup(
         "numpy>=1.20.0",
         "scipy>=1.7.0",
         "pydantic>=1.8.0",
+        "matplotlib",
+        "seaborn",
+        "jupyterlab"
     ],
     python_requires=">=3.8",
 )
