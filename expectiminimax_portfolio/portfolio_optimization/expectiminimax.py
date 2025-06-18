@@ -32,23 +32,17 @@ class ExpectiminimaxOptimizer:
         self.n_assets = len(ASSET_CLASSES)
         self.n_years = 3  # 3-year scenarios
 
-    def optimize_single_profile(self, risk_aversion: float) -> OptimizationResult:
+    def optimize_single_profile(self, risk_aversion: float, utility_type: str = "crra") -> OptimizationResult:
         """Optimize portfolio for single risk aversion profile"""
 
-        # Initial weights (equal allocation)
         initial_weights = np.ones(self.n_assets) / self.n_assets
-
-        # Constraints: weights sum to 1
         constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
-
-        # Bounds: weight limits for each asset
         bounds = [(self.min_weight, self.max_weight) for _ in range(self.n_assets)]
 
-        # Objective function (minimize negative expectiminimax value)
+        # Objective function: maximize expected utility
         def objective(weights):
-            return -self._expectiminimax_value(weights, risk_aversion)
+            return -self._expectiminimax_value(weights, risk_aversion, utility_type)
 
-        # Optimize
         result = minimize(
             objective, initial_weights, method='SLSQP',
             bounds=bounds, constraints=constraints,
@@ -86,34 +80,80 @@ class ExpectiminimaxOptimizer:
 
         return results
 
-    def _expectiminimax_value(self, weights: np.ndarray, risk_aversion: float) -> float:
-        """Calculate expectiminimax value for given weights and risk aversion"""
+    def _expectiminimax_value(self, weights: np.ndarray, risk_aversion: float, utility_type: str = "crra") -> float:
+        """Calculate expectiminimax value as probability-weighted sum of scenario utilities"""
 
         expected_utility = 0.0
 
+        # Calculate utility for each scenario and weight by probability
         for scenario_name, probability in self.scenario_probabilities.items():
             if scenario_name in self.asset_returns:
-                scenario_utility = self._scenario_utility(weights, scenario_name, risk_aversion)
+                # Get portfolio returns path for this scenario
+                portfolio_returns = self._portfolio_returns_path(weights, scenario_name)
+
+                # Calculate utility for this specific scenario
+                scenario_utility = self._calculate_scenario_utility(
+                    portfolio_returns,
+                    risk_aversion,
+                    utility_type
+                )
+
+                # Weight by scenario probability
                 expected_utility += probability * scenario_utility
 
         return expected_utility
 
-    def _scenario_utility(self, weights: np.ndarray, scenario_name: str, risk_aversion: float) -> float:
-        """Calculate utility for specific scenario"""
+    def _calculate_scenario_utility(self, portfolio_returns: np.ndarray, risk_aversion: float, utility_type: str) -> float:
+        """Calculate utility for a single scenario"""
 
-        # Get portfolio returns for this scenario
-        portfolio_returns = self._portfolio_returns_path(weights, scenario_name)
-
-        # Calculate mean-variance utility
-        mean_return = np.mean(portfolio_returns)
-
-        if risk_aversion == 0.0:
-            # Risk neutral case
-            return mean_return
+        if utility_type == "crra":
+            return self._crra_utility(portfolio_returns, risk_aversion)
+        elif utility_type == "mean_variance":
+            return self._mean_variance_utility(portfolio_returns, risk_aversion)
         else:
-            # Risk averse case
-            variance = np.var(portfolio_returns)
-            return mean_return - (risk_aversion / 2) * variance
+            raise ValueError(f"Unknown utility type: {utility_type}")
+
+    def _crra_utility(self, portfolio_returns: np.ndarray, gamma: float) -> float:
+        """
+
+        U = (W_final)^(1-γ) / (1-γ)  for γ ≠ 1
+        U = ln(W_final)              for γ = 1
+
+        Where W_final = initial_wealth * (1+R1) * (1+R2) * (1+R3)
+        """
+
+        # Convert percentage returns to decimals
+        returns_decimal = portfolio_returns / 100
+
+        # Calculate final wealth (assuming initial wealth = 1)
+        final_wealth = 1.0
+        for r in returns_decimal:
+            final_wealth *= (1 + r)
+
+        # Handle negative wealth (should never happen with reasonable portfolios)
+        if final_wealth <= 0:
+            return -np.inf
+
+        # Calculate CRRA utility
+        if abs(gamma - 1.0) < 1e-8:  # γ ≈ 1 (log utility)
+            utility = np.log(final_wealth)
+        else:  # γ ≠ 1
+            utility = (final_wealth**(1 - gamma)) / (1 - gamma)
+
+        return utility
+
+    def _mean_variance_utility(self, portfolio_returns: np.ndarray, gamma: float) -> float:
+        """Mean-variance utility function"""
+
+        if gamma == 0.0:
+            # Risk neutral: sum of returns
+            return np.sum(portfolio_returns)
+
+        mean_return = np.mean(portfolio_returns)
+        variance = np.var(portfolio_returns)
+
+        # Scale to match the time horizon (3 years)
+        return mean_return - (gamma / 2) * variance
 
     def _portfolio_returns_path(self, weights: np.ndarray, scenario_name: str) -> np.ndarray:
         """Calculate portfolio returns path for given scenario and weights"""
@@ -131,24 +171,78 @@ class ExpectiminimaxOptimizer:
         return np.array(portfolio_returns)
 
     def _calculate_portfolio_metrics(self, weights: np.ndarray) -> tuple:
-        """Calculate expected return and volatility across all scenarios"""
+        """Calculate expected return and volatility with proper mathematical units"""
 
-        expected_return = 0.0
-        expected_variance = 0.0
+        # Calculate cumulative returns
+        cumulative_returns_decimal = []
+        probabilities = []
 
         for scenario_name, probability in self.scenario_probabilities.items():
             if scenario_name in self.asset_returns:
                 portfolio_returns = self._portfolio_returns_path(weights, scenario_name)
 
-                scenario_mean = np.mean(portfolio_returns)
-                scenario_variance = np.var(portfolio_returns)
+                # Calculate 3-year cumulative return
+                cumulative_decimal = np.prod([1 + r/100 for r in portfolio_returns]) - 1
 
-                expected_return += probability * scenario_mean
-                expected_variance += probability * scenario_variance
+                cumulative_returns_decimal.append(cumulative_decimal)
+                probabilities.append(probability)
 
-        expected_volatility = np.sqrt(expected_variance)
+        cumulative_returns_decimal = np.array(cumulative_returns_decimal)
+        probabilities = np.array(probabilities)
 
-        return expected_return, expected_volatility
+        # Expected cumulative return
+        expected_return_decimal = np.sum(probabilities * cumulative_returns_decimal)
+
+        # Variance
+        variance_decimal = np.sum(probabilities * (cumulative_returns_decimal - expected_return_decimal)**2)
+
+        # Standard deviation (volatility) in decimal units
+        volatility_decimal = np.sqrt(variance_decimal)
+
+        # Convert to percentages for output
+        expected_return_pct = expected_return_decimal * 100
+        volatility_pct = volatility_decimal * 100
+
+        return expected_return_pct, volatility_pct
+
+    def get_detailed_scenario_analysis(self, weights: np.ndarray) -> Dict:
+        """Get detailed analysis showing cumulative returns by scenario"""
+
+        analysis = {
+            'scenario_cumulative_returns': {},
+            'scenario_annual_returns': {},
+            'probability_weighted_stats': {}
+        }
+
+        cumulative_returns = []
+        probabilities = []
+
+        for scenario_name, probability in self.scenario_probabilities.items():
+            if scenario_name in self.asset_returns:
+                portfolio_returns = self._portfolio_returns_path(weights, scenario_name)
+
+                # Annual returns
+                analysis['scenario_annual_returns'][scenario_name] = portfolio_returns.tolist()
+
+                # Cumulative return
+                cumulative = (np.prod([1 + r/100 for r in portfolio_returns]) - 1) * 100
+                analysis['scenario_cumulative_returns'][scenario_name] = cumulative
+
+                cumulative_returns.append(cumulative)
+                probabilities.append(probability)
+
+        # Summary statistics
+        cumulative_returns = np.array(cumulative_returns)
+        probabilities = np.array(probabilities)
+
+        analysis['probability_weighted_stats'] = {
+            'expected_cumulative_return': np.sum(probabilities * cumulative_returns),
+            'volatility': np.sqrt(np.sum(probabilities * (cumulative_returns - np.sum(probabilities * cumulative_returns))**2)),
+            'min_cumulative': np.min(cumulative_returns),
+            'max_cumulative': np.max(cumulative_returns)
+        }
+
+        return analysis
 
     def _validate_inputs(self):
         """Validate input data consistency"""

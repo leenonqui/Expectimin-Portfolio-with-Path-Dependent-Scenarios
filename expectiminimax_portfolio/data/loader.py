@@ -48,7 +48,7 @@ class DataLoader:
 
         # Filter to desired range
         filtered_data = self._raw_data.loc[
-            (self._raw_data.index >= start_year - SCENARIO_HORIZON_YEARS) &
+            (self._raw_data.index >= start_year - (SCENARIO_HORIZON_YEARS + 1)) &
             (self._raw_data.index <= end_year)
         ]
 
@@ -60,6 +60,7 @@ class DataLoader:
 
         # Align dataframes
         common_index = self._macro_data.index.intersection(self._asset_data.index)
+        print(common_index)
         self._macro_data = self._macro_data.loc[common_index]
         self._asset_data = self._asset_data.loc[common_index]
 
@@ -84,24 +85,14 @@ class DataLoader:
         """Process asset return data - FIXED VERSION"""
         asset_df = pd.DataFrame(index=raw_data.index)
 
-        # FIXED: Don't multiply by 100, and handle real rates properly
-        # The JST bill_rate might already be in the right units
-        cash_nominal = raw_data[JST_COLUMNS['cash']]  # Keep as decimal
-        stock_total = raw_data[JST_COLUMNS['stocks']]  # Keep as decimal
-        bond_total = raw_data[JST_COLUMNS['bonds']]    # Keep as decimal
+        cash_nominal = raw_data[JST_COLUMNS['cash']] * 100
+        stock_total = raw_data[JST_COLUMNS['stocks']] * 100
+        bond_total = raw_data[JST_COLUMNS['bonds']] * 100
 
-        # Convert inflation to decimal (it's calculated as percentage)
-        inflation_decimal = macro_data['Inflation'] / 100  # Convert % to decimal
-
-        # Calculate real returns - OPTION 1: Subtract inflation
-        cash_real = (cash_nominal) * 100  # Convert back to %
-        stock_real = (stock_total - inflation_decimal) * 100
-        bond_real = (bond_total - inflation_decimal) * 100
-
-        # OR OPTION 2: If bill_rate is already real, use directly
-        # cash_real = cash_nominal * 100  # Just convert to percentage
-        # stock_real = stock_total * 100
-        # bond_real = bond_total * 100
+        # Calculate real returns: Subtract inflation
+        cash_real = (cash_nominal - macro_data['Inflation'])
+        stock_real = (stock_total - macro_data['Inflation'])
+        bond_real = (bond_total - macro_data['Inflation'])
 
         # Asset variables for regression
         asset_df['Cash_YoY_Change'] = cash_real.diff()
@@ -114,4 +105,5 @@ class DataLoader:
         asset_df['Bond_Real_Level'] = bond_real
 
         asset_df.dropna(inplace=True)
+
         return asset_df

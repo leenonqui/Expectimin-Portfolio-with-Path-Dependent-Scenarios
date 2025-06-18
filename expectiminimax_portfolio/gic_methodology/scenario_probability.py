@@ -20,6 +20,10 @@ class GICScenarioProbability:
         self.macro_data = None
         self.historical_paths = None
         self.covariance_matrix = None
+        self.covariance_matrix_differences = None  # For scenario probabilities
+        self.inv_covariance_matrix_differences = None
+        self.covariance_matrix_levels = None       # For PSR shouldn't be here needs changing
+        self.inv_covariance_matrix_levels = None
 
     def calculate_probabilities(self, prediction_year: int) -> Dict[str, float]:
         """
@@ -40,7 +44,7 @@ class GICScenarioProbability:
         self._create_historical_paths()
 
         # Estimate covariance matrix from path differences
-        self._estimate_covariance_matrix()
+        self._estimate_covariance_matrices()
 
         # Calculate probabilities for each prospective scenario
         scenario_likelihoods = self._calculate_scenario_likelihoods()
@@ -75,58 +79,65 @@ class GICScenarioProbability:
 
         self.historical_paths = np.array(paths)
 
-    def _estimate_covariance_matrix(self):
+    def _estimate_covariance_matrices(self):
         """
-        Estimate covariance matrix from changes in path values
+        Estimate covariance matrix from changes in path values (scenario probabilities)
 
-        Following GIC paper: "We computed the covariance matrix from the changes
-        in the values of the economic variables from one three-year period to
-        the next three-year period"
+        Estimate covariance matrix from historichal paths (psr)
         """
         if len(self.historical_paths) < 2:
-            raise ValueError("Need at least 2 historical paths to compute differences")
+            raise ValueError("Need at least 2 historical paths")
 
-        # Calculate differences between consecutive paths
+        # 1. COVARIANCE OF PATH DIFFERENCES (for scenario probabilities)
         delta_paths = []
         for i in range(len(self.historical_paths) - SCENARIO_HORIZON_YEARS):
             delta = self.historical_paths[i + SCENARIO_HORIZON_YEARS] - self.historical_paths[i]
             delta_paths.append(delta)
 
         delta_paths_array = np.array(delta_paths)
+        self.covariance_matrix_differences = np.cov(delta_paths_array, rowvar=False)
 
-        # Compute covariance of path differences
-        self.covariance_matrix = np.cov(delta_paths_array, rowvar=False)
-
-        # Handle singular matrices
         try:
-            self.inv_covariance_matrix = np.linalg.inv(self.covariance_matrix)
+            self.inv_covariance_matrix_differences = np.linalg.inv(self.covariance_matrix_differences)
         except np.linalg.LinAlgError:
-            self.inv_covariance_matrix = np.linalg.pinv(self.covariance_matrix)
+            self.inv_covariance_matrix_differences = np.linalg.pinv(self.covariance_matrix_differences)
+
+        # 2. COVARIANCE OF PATH LEVELS (for PSR)
+        self.covariance_matrix_levels = np.cov(self.historical_paths, rowvar=False)
+
+        try:
+            self.inv_covariance_matrix_levels = np.linalg.inv(self.covariance_matrix_levels)
+        except np.linalg.LinAlgError:
+            self.inv_covariance_matrix_levels = np.linalg.pinv(self.covariance_matrix_levels)
+
+        print(f"Covariance matrices estimated:")
+        print(f"  Path differences: {self.covariance_matrix_differences.shape}")
+        print(f"  Path levels: {self.covariance_matrix_levels.shape}")
 
     def _calculate_scenario_likelihoods(self) -> Dict[str, float]:
-        """Calculate likelihood for each prospective scenario"""
+        """Calculate likelihood using PATH DIFFERENCES covariance"""
 
-        # Use last historical path as anchor (most recent economic experience)
         anchor_path = self.historical_paths[-1]
-
         scenario_likelihoods = {}
 
         for scenario_name, scenario_data in GIC_SCENARIOS.items():
-            # Create prospective scenario path vector
             prospective_path = create_path_vector(
                 scenario_data["GDP Growth"],
                 scenario_data["Inflation"]
             )
 
-            # Calculate Mahalanobis distance squared (GIC Equation 1)
+            # Use DIFFERENCES covariance matrix for scenario probabilities
             d_squared = mahalanobis_distance_squared(
                 prospective_path,
                 anchor_path,
-                self.inv_covariance_matrix
+                self.inv_covariance_matrix_differences  # <-- DIFFERENCES matrix
             )
 
-            # Calculate likelihood (GIC Equation 2)
             likelihood = scenario_likelihood(d_squared)
             scenario_likelihoods[scenario_name] = likelihood
 
         return scenario_likelihoods
+
+    def get_psr_covariance_matrix(self):
+        """Return the covariance matrix for PSR (path levels)"""
+        return self.inv_covariance_matrix_levels

@@ -46,7 +46,7 @@ class GICAssetForecasting:
         prob_estimator = GICScenarioProbability(self.data_loader.file_path)
         prob_estimator.macro_data = self.macro_data
         prob_estimator._create_historical_paths()
-        prob_estimator._estimate_covariance_matrix()
+        prob_estimator._estimate_covariance_matrices()
 
         # Forecast returns for each scenario
         scenario_returns = {}
@@ -64,7 +64,7 @@ class GICAssetForecasting:
                 self.macro_paths,
                 self.asset_paths,
                 prospective_macro_path,
-                prob_estimator.inv_covariance_matrix
+                prob_estimator.get_psr_covariance_matrix()
             )
 
             # Convert to final return levels

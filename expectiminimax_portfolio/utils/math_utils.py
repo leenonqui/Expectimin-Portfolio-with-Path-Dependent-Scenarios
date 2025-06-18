@@ -16,7 +16,7 @@ def informativeness(x_i: np.ndarray, x_mean: np.ndarray, inv_cov: np.ndarray) ->
 
     From GIC paper Equation 4: Informativeness(xi) = (xi - x̄)'Ω^-1(xi - x̄)
     """
-    return mahalanobis(x_i, x_mean, inv_cov) ** 2
+    return (mahalanobis(x_i, x_mean, inv_cov) ** 2)
 
 def create_path_vector(*time_series) -> np.ndarray:
     """Create flattened path vector from multiple time series"""

@@ -48,10 +48,18 @@ GIC_SCENARIOS = {
 # Risk Aversion Profiles for Expectiminimax Optimization
 RISK_AVERSION_PROFILES = [
     {"name": "Risk Neutral", "risk_aversion": 0.0},
-    {"name": "Low Risk Aversion", "risk_aversion": 0.5},
-    {"name": "Moderate Risk Aversion", "risk_aversion": 1.0},
-    {"name": "High Risk Aversion", "risk_aversion": 2.0},
-    {"name": "Very High Risk Aversion", "risk_aversion": 5.0}
+    {"name": "Low Risk Aversion", "risk_aversion": 1.0},
+    {"name": "Moderate Risk Aversion", "risk_aversion": 2.0},
+    {"name": "High Risk Aversion", "risk_aversion": 5.0},
+    {"name": "Very High Risk Aversion", "risk_aversion": 10.0}
+]
+
+CRRA_RISK_AVERSION_PROFILES = [
+    {"name": "Risk Neutral", "risk_aversion": 0.0},      # Linear utility
+    {"name": "Low Risk Aversion", "risk_aversion": 0.5},  # Mild concavity
+    {"name": "Moderate Risk Aversion", "risk_aversion": 1.0},  # Log utility
+    {"name": "High Risk Aversion", "risk_aversion": 2.0},     # Strong concavity
+    {"name": "Very High Risk Aversion", "risk_aversion": 4.0}  # Very concave
 ]
 
 # Asset Classes
