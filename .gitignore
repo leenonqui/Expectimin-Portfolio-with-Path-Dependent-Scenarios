@@ -197,9 +197,7 @@ $RECYCLE.BIN/
 # ===============================================================================
 
 # Large data files (keep sample data in repo, exclude large datasets)
-data/large_datasets/
-data/private/
-data/raw/
+data
 *.h5
 *.hdf5
 *.parquet
