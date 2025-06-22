@@ -1,7 +1,14 @@
+# Core dependencies for expectimin portfolio optimization
 pandas>=1.3.0
 numpy>=1.20.0
 scipy>=1.7.0
+
+# Data validation and modeling
 pydantic>=1.8.0
-matplotlib
-seaborn
-jupyterlab
+
+# Visualization and analysis
+matplotlib>=3.3.0
+seaborn>=0.11.0
+
+# Development and analysis environment  
+jupyterlab>=3.0.0
