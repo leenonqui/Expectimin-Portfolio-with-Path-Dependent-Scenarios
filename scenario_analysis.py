@@ -8,8 +8,9 @@ import pandas as pd
 from typing import Dict, List, Tuple
 
 from constants import (
-    SCENARIOS, DATA_COLUMNS, HORIZON, PSR_TOP_PERCENTILE,
-    HISTORICAL_START_YEAR, MIN_HISTORICAL_YEARS
+    SCENARIOS, HORIZON, PSR_TOP_PERCENTILE,
+    HISTORICAL_START_YEAR, MIN_HISTORICAL_YEARS,
+    CURRENT_INTEREST_RATE
 )
 from utils import (
     create_path_vector, calculate_relevance, calculate_mahalanobis_distance,
@@ -32,27 +33,52 @@ class ScenarioAnalyzer:
         self.horizon = horizon
         self.data = self._load_data(data_path)
         self.scenarios = SCENARIOS
+        self.current_rate = calculate_real_return(CURRENT_INTEREST_RATE, 1.2)
 
     def _load_data(self, path: str) -> pd.DataFrame:
-        """Load and prepare historical data"""
-        df = pd.read_csv(path, sep=';', index_col=DATA_COLUMNS['year'])
+        """Load and prepare all required data columns"""
+
+        # Load raw data
+        df = pd.read_csv(path, sep=';', index_col='year')
 
         # Convert European decimal format if needed
-        numeric_cols = [DATA_COLUMNS[key] for key in ['gdp', 'cpi', 'cash', 'stocks', 'bonds']]
+        numeric_cols = ['rgdpmad', 'cpi', 'bill_rate', 'eq_tr', 'bond_tr']
         for col in numeric_cols:
             if col in df.columns and df[col].dtype == 'object':
                 df[col] = pd.to_numeric(df[col].str.replace(',', '.'), errors='coerce')
 
         # Calculate growth rates
-        df['gdp_growth'] = df[DATA_COLUMNS['gdp']].pct_change() * 100
-        df['inflation'] = df[DATA_COLUMNS['cpi']].pct_change() * 100
+        df['gdp_growth'] = df['rgdpmad'].pct_change() * 100
+        df['inflation'] = df['cpi'].pct_change() * 100
 
-        # Keep original columns for return calculations
-        df['bond_tr'] = df[DATA_COLUMNS['bonds']]
-        df['eq_tr'] = df[DATA_COLUMNS['stocks']]
-        df['bill_rate'] = df[DATA_COLUMNS['cash']]
+        # Keep original asset columns with cleaner names
+        df['bill_rate'] = df['bill_rate']  # Already named correctly
+        df['eq_tr'] = df['eq_tr']          # Already named correctly
+        df['bond_tr'] = df['bond_tr']      # Already named correctly
 
-        return df.dropna()
+        # Calculate real returns
+        df['bill_rr'] = ((1 + df['bill_rate']) / (1 + df['inflation']/100) - 1) * 100
+        df['stock_rr'] = ((1 + df['eq_tr']) / (1 + df['inflation']/100) - 1) * 100
+        df['bond_rr'] = ((1 + df['bond_tr']) / (1 + df['inflation']/100) - 1) * 100
+
+        # Calculate derived series
+        df['bill_rr_changes'] = df['bill_rr'].diff()
+        df['stock_excess'] = df['stock_rr'] - df['bill_rr']
+        df['bond_excess'] = df['bond_rr'] - df['bill_rr']
+
+        # Filter to our analysis period (1927-2019) and remove NaN
+        df = df.loc[1927:2019].dropna()
+
+        print(f"Debug: Data loaded for years {df.index.min()}-{df.index.max()}")
+        print(f"Debug: Final data shape: {df.shape}")
+
+        # Debug: Show sample calculations
+        print("\nDebug: Sample real returns vs nominal returns (last 5 years):")
+        for year in df.index[-5:]:
+            row = df.loc[year]
+            print(f"  {year}: Bill={row['bill_rr']:.1f}% vs {row['bill_rate']:.1f}%, Stock={row['stock_rr']:.1f}% vs {row['eq_tr']:.1f}%, Bond={row['bond_rr']:.1f}% vs {row['bond_tr']:.1f}% Inflation={row['inflation']:.1f}%")
+
+        return df
 
     def estimate_probabilities(self, anchor_year: int) -> Dict[str, float]:
         """
@@ -71,6 +97,7 @@ class ScenarioAnalyzer:
 
         # Step 1: Define anchor path γ
         anchor_path = self._get_anchor_path(anchor_year)
+        print(f"Anchor Path = {anchor_path}\n")
 
         # Step 2: Calculate covariance matrix Ω
         omega = self._calculate_covariance_matrix(anchor_year, 3)
@@ -110,14 +137,14 @@ class ScenarioAnalyzer:
         paths, _ = prepare_historical_paths(self.data, self.horizon, end_year)
 
         if lag == 0:
-            return np.cov(paths)
+            return np.cov(paths, rowvar=False)
 
 
         # Calculate differences between consecutive paths
         path_differences = calculate_path_differences(paths, lag=lag)
 
         # Covariance matrix of path differences
-        return np.cov(path_differences)
+        return np.cov(path_differences, rowvar=False)
 
     def forecast_returns(self, anchor_year: int,
                         top_percentile: float = PSR_TOP_PERCENTILE) -> Dict[str, Dict[str, List[float]]]:
@@ -136,11 +163,24 @@ class ScenarioAnalyzer:
         hist_paths, hist_returns = self._prepare_historical_data(anchor_year)
 
         # Get covariance for relevance calculation
-        omega_inv = safe_matrix_inverse(self._calculate_covariance_matrix(anchor_year))
+        omega_inv = safe_matrix_inverse(self._calculate_covariance_matrix(anchor_year, 0))
         x_bar = hist_paths.mean(axis=0)
 
         # Get anchor year cash real rate for cumulative calculation
-        anchor_cash_real = self.data.loc[anchor_year, 'cash_real']
+        # Make sure we have this column calculated
+        if 'bill_rr' not in self.data.columns:
+            cash_real = []
+            for _, row in self.data.iterrows():
+                cash_real.append(calculate_real_return(row['bill_rate'], row['inflation']))
+            self.data['bill_rr'] = cash_real
+
+        anchor_cash_real = self.current_rate
+        print(f"Debug: Anchor year ({anchor_year}) cash real rate: {anchor_cash_real:.2f}%")
+
+        # Debug: Check historical return data structure
+        print(f"Debug: Historical paths shape: {hist_paths.shape}")
+        print(f"Debug: Historical returns shape: {hist_returns.shape}")
+        print(f"Debug: Expected returns shape: (n_obs, {3 * self.horizon}) for 3 assets × {self.horizon} years")
 
         # Forecast for each scenario
         forecasts = {}
@@ -158,8 +198,7 @@ class ScenarioAnalyzer:
             n_top = max(1, int(len(relevances) * top_percentile))
             top_indices = np.argsort(relevances)[-n_top:]
 
-            # Forecast using partial sample regression (Equation 6 from thesis)
-            scenario_forecasts = {}
+            print(f"Debug: Scenario {scenario_name} - Using top {n_top} out of {len(relevances)} observations")
 
             # Apply partial sample regression to the entire return vector
             # hist_returns shape: (n_observations, 9)
@@ -171,12 +210,19 @@ class ScenarioAnalyzer:
 
             # Apply partial sample regression formula for the entire vector
             weighted_sum = np.zeros(9)
+            total_relevance = 0
             for i, idx in enumerate(top_indices):
                 rel = relevances[idx]
                 weighted_sum += rel * (hist_returns[idx] - y_bar)
+                total_relevance += rel
 
             # Predicted return vector
             y_hat = y_bar + weighted_sum / (2 * n_top)  # Shape: (9,)
+
+            # Debug output for first scenario
+            if scenario_name == list(self.scenarios.keys())[0]:
+                print(f"Debug: y_bar (top {n_top} avg): {y_bar[:3]} (cash changes)")
+                print(f"Debug: y_hat (predicted): {y_hat[:3]} (cash changes)")
 
             # Extract asset-specific forecasts from predicted vector
             # 0:3 = interest rate changes (cash)
@@ -188,16 +234,22 @@ class ScenarioAnalyzer:
             bond_excess = y_hat[2*self.horizon:3*self.horizon]
 
             # Convert interest rate changes to cumulative cash returns
-            cumulative_cash = [anchor_cash_real]
-            for change in cash_changes:
-                cumulative_cash.append(cumulative_cash[-1] + change)
+            # Start from anchor year cash rate and add predicted changes
+            cash_levels = []
+            current_cash_rate = anchor_cash_real
 
-            scenario_forecasts['Cash'] = cumulative_cash[1:]  # Exclude anchor year
+            for change in cash_changes:
+                current_cash_rate += change  # Add the predicted change
+                cash_levels.append(current_cash_rate)
+
+            scenario_forecasts = {}
+            scenario_forecasts['Cash'] = cash_levels
 
             # Stock returns (excess returns + cash returns)
             stock_forecasts = []
             for year in range(self.horizon):
-                stock_total = stock_excess[year] + scenario_forecasts['Cash'][year]
+                # Total stock return = cash return + excess return
+                stock_total = scenario_forecasts['Cash'][year] + stock_excess[year]
                 stock_forecasts.append(stock_total)
 
             scenario_forecasts['Stocks'] = stock_forecasts
@@ -205,57 +257,72 @@ class ScenarioAnalyzer:
             # Bond returns (excess returns + cash returns)
             bond_forecasts = []
             for year in range(self.horizon):
-                bond_total = bond_excess[year] + scenario_forecasts['Cash'][year]
+                # Total bond return = cash return + excess return
+                bond_total = scenario_forecasts['Cash'][year] + bond_excess[year]
                 bond_forecasts.append(bond_total)
 
             scenario_forecasts['Bonds'] = bond_forecasts
+
+            # Debug output for first scenario
+            if scenario_name == list(self.scenarios.keys())[0]:
+                print(f"Debug: Cash levels: {[f'{x:.2f}%' for x in cash_levels]}")
+                print(f"Debug: Stock excess: {[f'{x:.2f}%' for x in stock_excess]}")
+                print(f"Debug: Bond excess: {[f'{x:.2f}%' for x in bond_excess]}")
+                print(f"Debug: Final stocks: {[f'{x:.2f}%' for x in stock_forecasts]}")
+                print(f"Debug: Final bonds: {[f'{x:.2f}%' for x in bond_forecasts]}")
 
             forecasts[scenario_name] = scenario_forecasts
 
         return forecasts
 
-    def _prepare_historical_data(self, end_year: int, start_year: int = HISTORICAL_START_YEAR) -> Tuple[np.ndarray, np.ndarray]:
+    def _prepare_historical_data(self, end_year: int, start_year: int = 1927) -> Tuple[np.ndarray, np.ndarray]:
         """Prepare aligned historical paths and returns"""
+
         macro_paths = []
         asset_paths = []
 
-    # First, calculate real returns for all rows
-        cash_real = []
-        stock_real = []
-        bond_real = []
-    
-        for _, row in self.data.iterrows():
-            cash_real.append(calculate_real_return(row['bill_rate'], row['inflation']))
-            stock_real.append(calculate_real_return(row['eq_tr'], row['inflation']))
-            bond_real.append(calculate_real_return(row['bond_tr'], row['inflation']))
-    
-        # Add calculated columns to dataframe
-        self.data['cash_real'] = cash_real
-        self.data['stock_real'] = stock_real
-        self.data['bond_real'] = bond_real
-    
-        # Calculate derived columns
-        self.data['interest_rate_changes'] = self.data['cash_real'].diff()
-        self.data['stock_excess_return'] = self.data['stock_real'] - self.data['cash_real']
-        self.data['bond_excess_return'] = self.data['bond_real'] - self.data['cash_real']
+        # Create 3-year rolling windows from start_year to end_year
+        for year in range(start_year, end_year - self.horizon + 2):  # +2 to include end_year
+            window_end = year + self.horizon - 1
 
-        self.data.dropna(inplace=True)
+            if window_end > end_year:
+                break
 
-        # Get T-year rolling windows
-        for start in self.data.index[start_year-2:-self.horizon]: # start_year - 2 to get the paths to end on start year [1927, 1928, 1929]
-            if start + self.horizon - 1 > end_year:
-                break# Asset returns (real returns)
+            # Extract 3-year window
+            try:
+                window = self.data.loc[year:window_end]
 
-            # Economic path
-            window = self.data.loc[start:start+self.horizon-1]
-            gdp_path = window['gdp_growth'].values
-            inf_path = window['inflation'].values
-            macro_paths.append(create_path_vector(gdp_path.tolist(), inf_path.tolist()))
+                if len(window) != self.horizon:
+                    continue
 
-            # Asset path
-            interest_path = window['interest_rate_changes'].values
-            stock_path = window['stock_excess_return'].values
-            bond_path = window['bond_excess_return'].values
-            asset_paths.append(create_path_vector(interest_path.tolist(), stock_path.tolist(), bond_path.tolist()))
+                # Macro path: [GDP1, GDP2, GDP3, INF1, INF2, INF3]
+                gdp_path = window['gdp_growth'].values
+                inf_path = window['inflation'].values
+                macro_vector = np.concatenate([gdp_path, inf_path], axis=None)
+                macro_paths.append(macro_vector)
+
+                # Asset path: [bill_changes1, bill_changes2, bill_changes3,
+                #              stock_excess1, stock_excess2, stock_excess3,
+                #              bond_excess1, bond_excess2, bond_excess3]
+                bill_changes = window['bill_rr_changes'].values
+                stock_excess = window['stock_excess'].values
+                bond_excess = window['bond_excess'].values
+                asset_vector = np.concatenate([bill_changes, stock_excess, bond_excess], axis=None)
+                asset_paths.append(asset_vector)
+
+            except (KeyError, IndexError) as e:
+                print(f"Debug: Skipping window {year}-{window_end}: {e}")
+                continue
+
+        print(f"Debug: Generated {len(macro_paths)} historical paths")
+        print(f"Debug: Expected paths from {start_year} to {end_year - self.horizon + 1}: {end_year - self.horizon + 1 - start_year + 1}")
+
+        if len(asset_paths) > 0:
+            print(f"Debug: Macro path shape: {np.array(macro_paths).shape} (expected: n_paths × 6)")
+            print(f"Debug: Asset path shape: {np.array(asset_paths).shape} (expected: n_paths × 9)")
+
+            # Show sample path
+            print(f"Debug: Sample macro path: {macro_paths[0]}")
+            print(f"Debug: Sample asset path: {asset_paths[0]}")
 
         return np.array(macro_paths), np.array(asset_paths)

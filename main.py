@@ -1,214 +1,362 @@
 """
-Simple example demonstrating the complete workflow
-Following the thesis methodology from Chapter 3
+Main Analysis for Bachelor Thesis:
+"Expectimin Optimal Portfolio with Scenario-Dependent Paths"
+
+Clean pipeline:
+1. Scenario probability estimation using Mahalanobis distance
+2. Asset return forecasting using partial sample regression
+3. Portfolio optimization minimizing expected cumulative loss
 """
 
-from scenario_analysis import ScenarioAnalyzer
-from portfolio_optimizer import CVaROptimizer
-from constants import HORIZON, DEFAULT_CONFIDENCE_LEVEL, ASSET_CLASSES
-from utils import get_risk_free_rate, calculate_cumulative_return
+import os
+import pandas as pd
+from typing import Dict, List
 
-def print_section_header(title: str):
-    """Print formatted section header"""
-    print(f"\n{'='*60}")
-    print(f"{title}")
-    print(f"{'='*60}")
+from constants import SCENARIOS, ASSET_CLASSES, HORIZON
+from scenario_analysis import ScenarioAnalyzer
+from portfolio_optimization import ExpectiminOptimizer
+
+
+def run_bachelor_thesis_analysis(data_path: str,
+                                anchor_year: int = 2019,
+                                min_required_returns: List[float] = None,
+                                save_results: bool = True) -> Dict:
+    """
+    Complete bachelor thesis analysis pipeline.
+
+    Args:
+        data_path: Path to historical economic data CSV
+        anchor_year: Anchor year for scenario analysis
+        min_required_returns: Different minimum return requirements to test
+        save_results: Whether to save results to files
+
+    Returns:
+        Complete analysis results
+    """
+    if min_required_returns is None:
+        min_required_returns = [0.02, 0.04, 0.06]  # 2%, 4%, 6% minimum returns
+
+    print(f"BACHELOR THESIS ANALYSIS")
+    print(f"Expectimin Optimal Portfolio with Scenario-Dependent Paths")
+    print(f"{'='*80}")
+    print(f"Data source: {data_path}")
+    print(f"Anchor year: {anchor_year}")
+    print(f"Investment horizon: {HORIZON} years")
+    print(f"Minimum return requirements: {[f'{ret:.0%}' for ret in min_required_returns]}")
+    print(f"Scenarios analyzed: {len(SCENARIOS)}")
+    print(f"Asset classes: {', '.join(ASSET_CLASSES)}")
+
+    results = {
+        'config': {
+            'data_path': data_path,
+            'anchor_year': anchor_year,
+            'min_required_returns': min_required_returns,
+            'scenarios': list(SCENARIOS.keys()),
+            'asset_classes': ASSET_CLASSES,
+            'investment_horizon': HORIZON
+        }
+    }
+
+    try:
+        # ================================================================
+        # STEP 1: ESTIMATE SCENARIO PROBABILITIES
+        # ================================================================
+
+        print(f"\n{'STEP 1: SCENARIO PROBABILITY ESTIMATION':=^80}")
+
+        analyzer = ScenarioAnalyzer(data_path, horizon=HORIZON)
+        probabilities = analyzer.estimate_probabilities(anchor_year)
+
+        print(f"\nEstimated Scenario Probabilities:")
+        print(f"{'-'*50}")
+        for scenario, prob in probabilities.items():
+            print(f"  {scenario:15}: {prob:6.1%}")
+        print(f"{'-'*50}")
+        print(f"  {'Total':15}: {sum(probabilities.values()):6.1%}")
+
+        most_likely = max(probabilities.items(), key=lambda x: x[1])
+        least_likely = min(probabilities.items(), key=lambda x: x[1])
+
+        print(f"\nKey Findings:")
+        print(f"  • Most likely scenario: {most_likely[0]} ({most_likely[1]:.1%})")
+        print(f"  • Least likely scenario: {least_likely[0]} ({least_likely[1]:.1%})")
+
+        results['probabilities'] = probabilities
+
+        # ================================================================
+        # STEP 2: FORECAST ASSET RETURNS
+        # ================================================================
+
+        print(f"\n{'STEP 2: ASSET RETURN FORECASTING':=^80}")
+
+        forecasts = analyzer.forecast_returns(anchor_year)
+
+        print(f"\nAsset Return Forecasts (Annual %):")
+        print(f"{'-'*80}")
+
+        header = f"{'Scenario':<15} {'Prob':<8} {'Year':<6}"
+        for asset in ASSET_CLASSES:
+            header += f"{asset:>10}"
+        print(header)
+        print(f"{'-'*80}")
+
+        for scenario_name, asset_returns in forecasts.items():
+            prob = probabilities[scenario_name]
+
+            for year in range(HORIZON):
+                year_label = f"Year {year+1}" if year == 0 else f"Year {year+1}"
+                prob_label = f"{prob:>6.1%}" if year == 0 else ""
+                scenario_label = scenario_name if year == 0 else ""
+
+                row = f"{scenario_label:<15} {prob_label:<8} {year_label:<6}"
+                for asset in ASSET_CLASSES:
+                    return_val = asset_returns[asset][year]
+                    row += f"{return_val:>9.1f}%"
+                print(row)
+            print()
+
+        results['forecasts'] = forecasts
+
+        # ================================================================
+        # STEP 3: OPTIMIZE PORTFOLIO
+        # ================================================================
+
+        print(f"\n{'STEP 3: PORTFOLIO OPTIMIZATION':=^80}")
+
+        optimizer = ExpectiminOptimizer(ASSET_CLASSES)
+        optimization_results = {}
+
+        for min_return in min_required_returns:
+            print(f"\nOptimizing for minimum required return: {min_return:.0%}")
+
+            result = optimizer.optimize_expectimin_cumulative_loss(
+                scenario_forecasts=forecasts,
+                probabilities=probabilities,
+                min_return=min_return
+            )
+
+            optimization_results[min_return] = result
+
+            if result['success']:
+                print(f"  ✅ Expected Loss: {result['expected_cumulative_loss']:.4f} ({result['expected_cumulative_loss']*100:.2f}%)")
+                print(f"  ✅ Expected Return: {result['expected_cumulative_return']:.4f} ({result['expected_cumulative_return']*100:.2f}%)")
+                print(f"  ✅ Probability of Loss: {result['probability_of_loss']:.1%}")
+                print(f"  ✅ Weights: {', '.join(f'{asset}={weight:.1%}' for asset, weight in result['weights'].items())}")
+            else:
+                print(f"  ❌ Optimization failed: {result['message']}")
+
+        results['optimization_results'] = optimization_results
+
+        # ================================================================
+        # RESULTS SUMMARY
+        # ================================================================
+
+        print(f"\n{'THESIS RESULTS SUMMARY':=^80}")
+
+        successful_results = {k: v for k, v in optimization_results.items() if v['success']}
+
+        if successful_results:
+            print(f"\nOptimal Portfolio Allocations:")
+            print(f"{'-'*100}")
+
+            header = f"{'Min Return':<12} {'Expected Loss':<15} {'Expected Return':<16} {'Prob of Loss':<13}"
+            for asset in ASSET_CLASSES:
+                header += f"{asset:>12}"
+            print(header)
+            print(f"{'-'*100}")
+
+            for min_return, result in successful_results.items():
+                row = f"{min_return:>10.0%} "
+                row += f"{result['expected_cumulative_loss']*100:>13.2f}% "
+                row += f"{result['expected_cumulative_return']*100:>14.2f}% "
+                row += f"{result['probability_of_loss']*100:>11.1f}% "
+
+                for asset in ASSET_CLASSES:
+                    weight = result['weights'][asset]
+                    row += f"{weight:>11.1%}"
+                print(row)
+
+            print(f"{'-'*100}")
+
+            # Key insights
+            min_loss_result = min(successful_results.items(), key=lambda x: x[1]['expected_cumulative_loss'])
+            max_return_result = max(successful_results.items(), key=lambda x: x[1]['expected_cumulative_return'])
+
+            print(f"\nKey Findings:")
+            print(f"  • Lowest expected loss: {min_loss_result[1]['expected_cumulative_loss']*100:.2f}% (with {min_loss_result[0]:.0%} min return requirement)")
+            print(f"  • Highest expected return: {max_return_result[1]['expected_cumulative_return']*100:.2f}% (with {max_return_result[0]:.0%} min return requirement)")
+
+            print(f"\nAllocation Patterns:")
+            for min_return, result in successful_results.items():
+                weights = result['weights']
+                dominant_asset = max(weights.keys(), key=lambda k: weights[k])
+                print(f"  • {min_return:.0%} min return: {dominant_asset} dominant ({weights[dominant_asset]:.1%})")
+
+        else:
+            print("❌ No successful optimizations!")
+            for min_return, result in optimization_results.items():
+                print(f"  {min_return:.0%}: {result['message']}")
+
+        # ================================================================
+        # SCENARIO ANALYSIS
+        # ================================================================
+
+        if successful_results:
+            print(f"\n{'SCENARIO IMPACT ANALYSIS':=^80}")
+
+            representative_result = list(successful_results.values())[0]
+
+            print(f"Portfolio Performance by Scenario:")
+            print(f"{'Scenario':<15} {'Probability':<12} {'Cumulative Return':<18} {'Loss Amount':<15} {'Loss Contribution':<18}")
+            print(f"{'-'*90}")
+
+            total_expected_loss = 0
+            for scenario in probabilities.keys():
+                prob = probabilities[scenario]
+                cum_return = representative_result['scenario_cumulative_returns'][scenario]
+                loss_amount = representative_result['scenario_losses'][scenario]
+                loss_contrib = loss_amount * prob
+                total_expected_loss += loss_contrib
+
+                print(f"{scenario:<15} {prob:>10.1%} {cum_return:>16.2%} {loss_amount:>13.2%} {loss_contrib:>16.4%}")
+
+            print(f"{'-'*90}")
+            print(f"{'Total Expected':<15} {'100.0%':>10} {representative_result['expected_cumulative_return']:>16.2%} {'':>13} {total_expected_loss:>16.4%}")
+
+        # ================================================================
+        # SAVE RESULTS
+        # ================================================================
+
+        if save_results:
+            try:
+                output_dir = "thesis_results"
+                os.makedirs(output_dir, exist_ok=True)
+
+                # Save main results
+                if successful_results:
+                    results_data = []
+                    for min_return, result in successful_results.items():
+                        results_data.append({
+                            'min_return_requirement': f"{min_return:.0%}",
+                            'expected_cumulative_loss_pct': result['expected_cumulative_loss'] * 100,
+                            'expected_cumulative_return_pct': result['expected_cumulative_return'] * 100,
+                            'probability_of_loss_pct': result['probability_of_loss'] * 100,
+                            'worst_case_pct': result['worst_case_cumulative'] * 100,
+                            'best_case_pct': result['best_case_cumulative'] * 100,
+                            **{f'weight_{asset}_pct': result['weights'][asset] * 100 for asset in ASSET_CLASSES}
+                        })
+
+                    pd.DataFrame(results_data).to_csv(f"{output_dir}/portfolio_results.csv", index=False)
+
+                # Save scenario probabilities
+                pd.DataFrame([probabilities]).to_csv(f"{output_dir}/scenario_probabilities.csv", index=False)
+
+                # Save forecasts
+                forecast_data = []
+                for scenario, asset_returns in forecasts.items():
+                    for year in range(HORIZON):
+                        forecast_data.append({
+                            'scenario': scenario,
+                            'year': year + 1,
+                            'probability': probabilities[scenario],
+                            **{asset: asset_returns[asset][year] for asset in ASSET_CLASSES}
+                        })
+
+                pd.DataFrame(forecast_data).to_csv(f"{output_dir}/return_forecasts.csv", index=False)
+
+                print(f"\n✅ Results saved to '{output_dir}/' directory")
+
+            except Exception as e:
+                print(f"\n❌ Error saving results: {str(e)}")
+
+        # ================================================================
+        # FINAL STATUS
+        # ================================================================
+
+        successful_optimizations = len(successful_results)
+        total_optimizations = len(optimization_results)
+
+        print(f"\n{'ANALYSIS COMPLETED':=^80}")
+        print(f"✅ Scenario probabilities: Estimated for {len(SCENARIOS)} scenarios")
+        print(f"✅ Asset return forecasts: Generated for {HORIZON}-year horizon")
+        print(f"✅ Portfolio optimizations: {successful_optimizations}/{total_optimizations} successful")
+
+        if successful_optimizations == total_optimizations:
+            print(f"🎉 Bachelor thesis analysis completed successfully!")
+        elif successful_optimizations > 0:
+            print(f"⚠️  Partial success - {total_optimizations - successful_optimizations} optimizations failed")
+        else:
+            print(f"❌ All optimizations failed")
+
+        results['success'] = successful_optimizations > 0
+        results['success_rate'] = successful_optimizations / total_optimizations if total_optimizations > 0 else 0
+
+        return results
+
+    except Exception as e:
+        print(f"\n❌ ANALYSIS FAILED: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+        results['success'] = False
+        results['error'] = str(e)
+        return results
+
 
 def main():
-    """Run complete analysis following thesis methodology"""
-    
-    print_section_header("PATH-DEPENDENT SCENARIO ANALYSIS AND CVAR OPTIMIZATION")
-    print("Following Chapter 3 Methodology")
-    
-    # Parameters
-    data_path = "data/usa_macro_var_and_asset_returns.csv"
-    anchor_year = 2019  # Last year of historical data
-    prediction_start_year = 2020  # First year of prediction period
-    
-    # Step 1: Initialize analyzer
-    print_section_header("STEP 1: LOADING HISTORICAL DATA")
-    analyzer = ScenarioAnalyzer(data_path)
-    print(f"  ✓ Loaded data up to year {anchor_year}")
-    print(f"  ✓ Investment horizon: {HORIZON} years ({prediction_start_year}-{prediction_start_year + HORIZON - 1})")
-    
-    # Get real risk-free rate from data
-    try:
-        real_rf_rate_annual = get_risk_free_rate(analyzer.data, prediction_start_year)
-        real_rf_cumulative = calculate_cumulative_return([real_rf_rate_annual] * HORIZON, as_log=False)
-        print(f"  ✓ Real risk-free rate: {real_rf_rate_annual:.2f}% annual ({real_rf_cumulative:.2f}% cumulative)")
-    except Exception as e:
-        # Fallback if data not available
-        real_rf_rate_annual = 0.5
-        real_rf_cumulative = calculate_cumulative_return([real_rf_rate_annual] * HORIZON, as_log=False)
-        print(f"  ⚠ Using default real risk-free rate: {real_rf_rate_annual:.2f}% annual ({real_rf_cumulative:.2f}% cumulative)")
-        print(f"    (Error: {e})")
-    
-    # Step 2: Estimate scenario probabilities (Section 3.1.2)
-    print_section_header("STEP 2: ESTIMATING SCENARIO PROBABILITIES")
-    probabilities = analyzer.estimate_probabilities(anchor_year)
-    
-    print(f"  Using Mahalanobis distance from {anchor_year-HORIZON+1}-{anchor_year} anchor path")
-    print(f"\n  Scenario Probabilities:")
-    print(f"  {'Scenario':<15} {'Probability':>10} {'Percentage':>10}")
-    print(f"  {'-'*40}")
-    for scenario, prob in sorted(probabilities.items(), key=lambda x: x[1], reverse=True):
-        print(f"  {scenario:<15} {prob:>10.4f} {prob*100:>9.2f}%")
-    
-    # Verify probabilities sum to 1
-    total_prob = sum(probabilities.values())
-    print(f"  {'-'*40}")
-    print(f"  {'Total':<15} {total_prob:>10.4f} {total_prob*100:>9.2f}%")
-    
-    # Step 3: Forecast asset returns (Section 3.1.3)
-    print_section_header("STEP 3: FORECASTING ASSET RETURNS")
-    returns = analyzer.forecast_returns(anchor_year)
-    
-    print(f"  Using top 25% most relevant historical observations")
-    print(f"\n  Sample forecasts (most probable scenario):")
-    most_probable = max(probabilities.items(), key=lambda x: x[1])[0]
-    sample_returns = returns[most_probable]
-    
-    print(f"  Scenario: {most_probable}")
-    print(f"  {'Asset':<10} {'Year 1':>8} {'Year 2':>8} {'Year 3':>8} {'Cumulative':>12}")
-    print(f"  {'-'*50}")
-    
-    for asset in ASSET_CLASSES:
-        yearly = sample_returns[asset]
-        cumul = calculate_cumulative_return(yearly, as_log=False)
-        print(f"  {asset:<10} {yearly[0]:>7.1f}% {yearly[1]:>7.1f}% {yearly[2]:>7.1f}% {cumul:>11.1f}%")
-    
-    # Step 4: Portfolio optimization (Section 3.2)
-    print_section_header("STEP 4: PORTFOLIO OPTIMIZATION (CVaR MINIMIZATION)")
-    print(f"  Confidence level: {DEFAULT_CONFIDENCE_LEVEL:.0%}")
-    print(f"  Alpha (tail probability): {1-DEFAULT_CONFIDENCE_LEVEL:.0%}")
-    
-    optimizer = CVaROptimizer(probabilities, returns)
-    
-    # Optimize without constraint
-    print(f"\n  A. Unconstrained CVaR Minimization:")
-    result_unconstrained = optimizer.optimize()
-    
-    if result_unconstrained.success:
-        print(f"     Optimal Weights:")
-        for asset, weight in result_unconstrained.weights.items():
-            print(f"       {asset}: {weight:>6.1%}")
-        print(f"\n     Risk Metrics:")
-        print(f"       CVaR (95%): {result_unconstrained.cvar:>7.2f}%")
-        print(f"       VaR (95%):  {result_unconstrained.var:>7.2f}%")
-        print(f"       Expected Return: {result_unconstrained.expected_return:>7.2f}%")
+    """Main function to run the bachelor thesis analysis."""
+
+    DATA_PATH = "data/usa_macro_var_and_asset_returns.csv"
+    ANCHOR_YEAR = 2019
+    MIN_REQUIRED_RETURNS = [0.0448, 0.0448*1.5, 0.0448*2]  # 2%, 4%, 6% minimum returns
+
+    print(f"BACHELOR THESIS")
+    print(f"Title: Expectimin Optimal Portfolio with Scenario-Dependent Paths")
+    print(f"Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # Check if data file exists
+    if not os.path.exists(DATA_PATH):
+        print(f"\n❌ ERROR: Data file '{DATA_PATH}' not found!")
+        return None
+
+    print(f"\n✅ Data file found: {DATA_PATH}")
+    print(f"✅ Configuration:")
+    print(f"   • Anchor year: {ANCHOR_YEAR}")
+    print(f"   • Investment horizon: {HORIZON} years")
+    print(f"   • Minimum return requirements: {[f'{ret:.0%}' for ret in MIN_REQUIRED_RETURNS]}")
+    print(f"   • Scenarios: {len(SCENARIOS)}")
+    print(f"   • Asset classes: {len(ASSET_CLASSES)}")
+
+    print(f"\n🚀 Starting bachelor thesis analysis...")
+
+    results = run_bachelor_thesis_analysis(
+        data_path=DATA_PATH,
+        anchor_year=ANCHOR_YEAR,
+        min_required_returns=MIN_REQUIRED_RETURNS,
+        save_results=True
+    )
+
+    print(f"\n{'BACHELOR THESIS ANALYSIS COMPLETE':=^80}")
+
+    if results['success']:
+        print(f"🎓 Analysis completed successfully!")
+        print(f"📈 Portfolio optimization successful")
+        print(f"💾 Results saved to 'thesis_results/' directory")
+        print(f"📊 Success rate: {results['success_rate']:.0%}")
+
+        print(f"\n📋 Next steps:")
+        print(f"   1. Review results in 'thesis_results/' directory")
+        print(f"   2. Analyze portfolio allocation patterns")
+        print(f"   3. Interpret economic scenario impacts")
+        print(f"   4. Write discussion and conclusions")
+
     else:
-        print(f"     ✗ Optimization failed")
-    
-    # Optimize with risk-free rate constraint
-    print(f"\n  B. CVaR Minimization with Minimum Return Constraint:")
-    print(f"     Constraint: Expected return ≥ {real_rf_cumulative:.2f}% (real risk-free rate)")
-    
-    result_constrained = optimizer.optimize(min_return=real_rf_cumulative)
-    
-    if result_constrained.success:
-        print(f"     Optimal Weights:")
-        for asset, weight in result_constrained.weights.items():
-            print(f"       {asset}: {weight:>6.1%}")
-        print(f"\n     Risk Metrics:")
-        print(f"       CVaR (95%): {result_constrained.cvar:>7.2f}%")
-        print(f"       VaR (95%):  {result_constrained.var:>7.2f}%")
-        print(f"       Expected Return: {result_constrained.expected_return:>7.2f}%")
-        print(f"       ✓ Meets minimum return constraint")
-    else:
-        print(f"     ✗ Optimization failed - constraint may be infeasible")
-    
-    # Step 5: Portfolio analysis
-    print_section_header("STEP 5: PORTFOLIO ANALYSIS")
-    
-    # Use constrained result if successful, otherwise unconstrained
-    portfolio_to_analyze = result_constrained if result_constrained.success else result_unconstrained
-    
-    if portfolio_to_analyze.success:
-        analysis = optimizer.analyze_portfolio(portfolio_to_analyze.weights)
-        
-        print(f"\n  Scenario-by-Scenario Returns ({HORIZON}-year cumulative):")
-        print(f"  {'Scenario':<15} {'Probability':>12} {'Return':>10} {'Status':<10}")
-        print(f"  {'-'*50}")
-        
-        # Sort by return for clarity
-        sorted_scenarios = sorted(analysis['scenario_returns'].items(), key=lambda x: x[1])
-        
-        for scenario, ret in sorted_scenarios:
-            prob = probabilities[scenario]
-            status = "TAIL RISK" if ret <= analysis['var'] else "NORMAL"
-            print(f"  {scenario:<15} {prob:>12.3f} {ret:>9.2f}%  {status:<10}")
-        
-        print(f"\n  Risk Metrics Summary:")
-        print(f"    Expected Return:     {analysis['expected_return']:>7.2f}%")
-        print(f"    Standard Deviation:  {analysis['std_dev']:>7.2f}%")
-        print(f"    VaR (95%):          {analysis['var']:>7.2f}% (5% chance of worse)")
-        print(f"    CVaR (95%):         {analysis['cvar']:>7.2f}% (expected loss if worse than VaR)")
-        print(f"    Worst Case:         {analysis['worst_case']:>7.2f}% ({min(analysis['scenario_returns'], key=analysis['scenario_returns'].get)})")
-        print(f"    Best Case:          {analysis['best_case']:>7.2f}% ({max(analysis['scenario_returns'], key=analysis['scenario_returns'].get)})")
-        
-        # Risk-return comparison
-        print(f"\n  Risk-Return Trade-off:")
-        print(f"    Return above risk-free: {analysis['expected_return'] - real_rf_cumulative:>6.2f}%")
-        print(f"    Sharpe Ratio:           {analysis['sharpe_ratio']:>6.3f}")
-        print(f"    Return-to-CVaR ratio:   {-analysis['expected_return'] / analysis['cvar']:>6.3f}")
-        
-        # Portfolio composition analysis
-        print(f"\n  Portfolio Composition Analysis:")
-        weights = portfolio_to_analyze.weights
-        
-        # Classify portfolio style
-        if weights['Cash'] > 0.6:
-            style = "Conservative (Cash-heavy)"
-        elif weights['Stocks'] > 0.6:
-            style = "Aggressive (Stock-heavy)"
-        elif weights['Bonds'] > 0.6:
-            style = "Income-focused (Bond-heavy)"
-        else:
-            style = "Balanced"
-        
-        print(f"    Portfolio Style: {style}")
-        print(f"    Diversification: ", end="")
-        
-        # Calculate concentration
-        concentration = sum(w**2 for w in weights.values())
-        if concentration > 0.8:
-            print("Low (concentrated)")
-        elif concentration > 0.5:
-            print("Moderate")
-        else:
-            print("High (well-diversified)")
-    
-    # Step 6: Efficient Frontier Analysis (optional)
-    print_section_header("STEP 6: EFFICIENT FRONTIER ANALYSIS (OPTIONAL)")
-    
-    print("  Generating efficient frontier...")
-    frontier = optimizer.efficient_frontier(n_points=10)
-    
-    if frontier:
-        print(f"\n  {'Expected Return':>15} {'CVaR':>10} {'Cash':>8} {'Stocks':>8} {'Bonds':>8}")
-        print(f"  {'-'*60}")
-        
-        for exp_ret, cvar, weights in frontier:
-            print(f"  {exp_ret:>14.2f}% {cvar:>9.2f}% {weights['Cash']:>7.1%} {weights['Stocks']:>7.1%} {weights['Bonds']:>7.1%}")
-        
-        print(f"\n  Frontier Summary:")
-        print(f"    Minimum CVaR: {min(f[1] for f in frontier):.2f}%")
-        print(f"    Maximum Return: {max(f[0] for f in frontier):.2f}%")
-    else:
-        print("  ✗ Could not generate efficient frontier")
-    
-    print(f"\n{'='*60}")
-    print("ANALYSIS COMPLETE")
-    print(f"{'='*60}")
-    
-    # Return results for further analysis
-    return {
-        'probabilities': probabilities,
-        'returns': returns,
-        'unconstrained': result_unconstrained,
-        'constrained': result_constrained,
-        'optimizer': optimizer
-    }
+        print(f"💥 Analysis failed!")
+        if 'error' in results:
+            print(f"❌ Error: {results['error']}")
+
+    return results
+
 
 if __name__ == "__main__":
     results = main()
