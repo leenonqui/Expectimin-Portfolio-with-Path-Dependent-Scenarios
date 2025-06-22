@@ -209,8 +209,8 @@ data/raw/
 *.xls
 
 # CSV outputs (keep input CSVs, exclude generated outputs)
-results/*.csv
-outputs/*.csv
+*results/*.csv
+*outputs/*.csv
 *_results.csv
 *_output.csv
 
