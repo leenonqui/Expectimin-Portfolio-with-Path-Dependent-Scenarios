@@ -9,8 +9,7 @@ from typing import Dict, List, Tuple
 
 from constants import (
     SCENARIOS, HORIZON, PSR_TOP_PERCENTILE,
-    HISTORICAL_START_YEAR, MIN_HISTORICAL_YEARS,
-    CURRENT_INTEREST_RATE
+    MIN_HISTORICAL_YEARS, CURRENT_INTEREST_RATE
 )
 from utils import (
     create_path_vector, calculate_relevance, calculate_mahalanobis_distance,
@@ -69,14 +68,7 @@ class ScenarioAnalyzer:
         # Filter to our analysis period (1927-2019) and remove NaN
         df = df.loc[1927:2019].dropna()
 
-        print(f"Debug: Data loaded for years {df.index.min()}-{df.index.max()}")
-        print(f"Debug: Final data shape: {df.shape}")
 
-        # Debug: Show sample calculations
-        print("\nDebug: Sample real returns vs nominal returns (last 5 years):")
-        for year in df.index[-5:]:
-            row = df.loc[year]
-            print(f"  {year}: Bill={row['bill_rr']:.1f}% vs {row['bill_rate']:.1f}%, Stock={row['stock_rr']:.1f}% vs {row['eq_tr']:.1f}%, Bond={row['bond_rr']:.1f}% vs {row['bond_tr']:.1f}% Inflation={row['inflation']:.1f}%")
 
         return df
 
@@ -121,6 +113,16 @@ class ScenarioAnalyzer:
 
     def _get_anchor_path(self, end_year: int) -> np.ndarray:
         """Extract anchor path γ from historical data"""
+        start_year = end_year - self.horizon + 1
+
+        path_data = self.data.loc[start_year:end_year]
+        gdp_path = path_data['gdp_growth'].values
+        inf_path = path_data['inflation'].values
+
+        return create_path_vector(gdp_path.tolist(), inf_path.tolist())
+
+    def _get_path(self, end_year: int) -> np.ndarray:
+        """Extract path from historical data"""
         start_year = end_year - self.horizon + 1
 
         path_data = self.data.loc[start_year:end_year]

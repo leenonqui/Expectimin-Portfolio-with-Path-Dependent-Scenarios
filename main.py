@@ -14,7 +14,7 @@ from typing import Dict, List
 
 from constants import SCENARIOS, ASSET_CLASSES, HORIZON
 from scenario_analysis import ScenarioAnalyzer
-from portfolio_optimization import ExpectiminOptimizer
+from portfolio_optimization import LinearExpectiminOptimizer
 
 
 def run_bachelor_thesis_analysis(data_path: str,
@@ -123,7 +123,7 @@ def run_bachelor_thesis_analysis(data_path: str,
 
         print(f"\n{'STEP 3: PORTFOLIO OPTIMIZATION':=^80}")
 
-        optimizer = ExpectiminOptimizer(ASSET_CLASSES)
+        optimizer = LinearExpectiminOptimizer(ASSET_CLASSES)
         optimization_results = {}
 
         for min_return in min_required_returns:
