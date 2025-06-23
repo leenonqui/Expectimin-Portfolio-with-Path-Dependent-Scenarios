@@ -308,7 +308,7 @@ def main():
 
     DATA_PATH = "data/usa_macro_var_and_asset_returns.csv"
     ANCHOR_YEAR = 2019
-    MIN_REQUIRED_RETURNS = [0.0448, 0.0448*1.5, 0.0448*2]  # 2%, 4%, 6% minimum returns
+    MIN_REQUIRED_RETURNS = [0, 0.0448, 0.0448*1.5, 0.0448*2]  # 2%, 4%, 6% minimum returns
 
     print(f"BACHELOR THESIS")
     print(f"Title: Expectimin Optimal Portfolio with Scenario-Dependent Paths")
