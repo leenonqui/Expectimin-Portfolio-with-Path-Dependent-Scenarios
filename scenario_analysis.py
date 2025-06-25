@@ -65,8 +65,8 @@ class ScenarioAnalyzer:
         df['stock_excess'] = df['stock_rr'] - df['bill_rr']
         df['bond_excess'] = df['bond_rr'] - df['bill_rr']
 
-        # Filter to our analysis period (1927-2019) and remove NaN
-        df = df.loc[1927:2019].dropna()
+        # Filter to our analysis period and remove NaN
+        df = df.loc[1925:2020].dropna()
 
 
 
