@@ -71,39 +71,27 @@ SCENARIOS: Dict[str, ScenarioDefinition] = {
 ASSET_CLASSES = ["Cash", "Stocks", "Bonds"]
 
 # ============================================================================
-# RISK FREE RATE, INFLATION and INTEREST RATE as of January 2nd 2020
+# RISK FREE RATES - Historical and Test Period
 # ============================================================================
 
 # Risk-free rate: 3-Year U.S. Treasury Constant Maturity Rate as of January 2, 2020
 # Source: Federal Reserve Economic Data (FRED), series GS3
-# Verified: 3-year Treasury rate was approximately 1.63% on January 2, 2020
 RISK_FREE_RATE = 0.0152  # 1.52%
 
 # Expected inflation rate for 2020-2022 forecast period
 # Calculation: Average of actual inflation rates 2020-2022
 # 2020: 1.2%, 2021: 4.7%, 2022: 8.0%
-# Source: U.S. Inflation Calculator (https://www.usinflationcalculator.com/inflation/annual-averages-for-rate-of-inflation/)
 INFLATION = (1.2 + 4.7 + 8.0) / 3.0 / 100  # 4.63% average, converted to decimal
 
 # Current interest rate for cash forecasting: 3-Month Treasury Bill Rate as of January 2, 2020
-# Source: Federal Reserve Economic Data (FRED), series TB3MS
-# This represents the baseline interest rate for cash return projections
 CURRENT_INTEREST_RATE = 0.0154  # 1.54% (3-Month Treasury on Jan 2, 2020)
 
-# ============================================================================
-# VERIFICATION SOURCES
-# ============================================================================
-#
-# You can verify these rates at:
-# - FRED (Federal Reserve Economic Data): https://fred.stlouisfed.org/
-#   - 3-Year Treasury: series GS3
-#   - 3-Month Treasury: series TB3MS
-# - Treasury.gov: https://www.treasury.gov/resource-center/data-chart-center/interest-rates/
-#
-# Historical rates around January 2, 2020:
-# - 3-Month Treasury: ~1.54%
-# - 3-Year Treasury: ~1.63%
-# - Federal Funds Rate: ~1.75%
+# Real risk-free rates for start of january 2018-2020
+REAL_RISK_FREE_RATES = {
+    2018: 0.0275,  # 2.75%
+    2019: 0.02625, # 2.625%
+    2020: 0.01625  # 1.625%
+}
 
 # ============================================================================
 # OPTIMIZATION PARAMETERS
@@ -116,6 +104,12 @@ MAX_WEIGHT = 1.0
 # Numerical tolerance for optimization
 OPTIMIZATION_TOLERANCE = 1e-12
 
+# Risk aversion parameter for mean-variance utility
+# A = 2: Risk neutral
+# A = 3-4: Moderate risk aversion
+# A = 5: High risk aversion
+RISK_AVERSION = 3.0  # Default moderate risk aversion
+
 # ============================================================================
 # ANALYSIS PARAMETERS
 # ============================================================================
@@ -124,7 +118,7 @@ OPTIMIZATION_TOLERANCE = 1e-12
 N_ECONOMIC_VARS = 2
 
 # Start year for full historical analysis
-HISTORICAL_START_YEAR = 1929
+HISTORICAL_START_YEAR = 1927
 
 # Minimum years of data required for analysis
 MIN_HISTORICAL_YEARS = 30

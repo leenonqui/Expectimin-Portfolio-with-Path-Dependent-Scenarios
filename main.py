@@ -1,20 +1,33 @@
 """
 main.py
-Clean main analysis script for game theory portfolio selection
+Simple sequential portfolio optimization with Bayesian learning
 """
 
-from typing import Dict, List
-
-from optimization import sequential_optimize, calculate_portfolio_performance
-from learning import create_learning_function
+from optimization import optimize_portfolio
+from learning import update_beliefs
 from scenario_analysis import ScenarioAnalyzer
-from constants import SCENARIOS
+from constants import SCENARIOS, RISK_AVERSION
 
 
-def display_scenario_paths():
-    """Display scenario economic paths"""
-    print("SCENARIO ECONOMIC PATHS")
-    print("=" * 80)
+def print_dataset_info(analyzer):
+    """Print head and tail of processed dataset"""
+    print("\n1) PROCESSED DATASET")
+    print("=" * 50)
+
+    data = analyzer.data
+    print("Dataset Head (first 5 rows):")
+    print(data.head())
+    print("\nDataset Tail (last 5 rows):")
+    print(data.tail())
+    print(f"\nDataset shape: {data.shape}")
+    print(f"Columns: {list(data.columns)}")
+
+
+def print_scenarios():
+    """Print scenario paths"""
+    print("\n2) SCENARIOS WITH PATHS")
+    print("=" * 50)
+
     print(f"{'Scenario':<15} {'GDP Year 1':<10} {'GDP Year 2':<10} {'GDP Year 3':<10} {'INF Year 1':<10} {'INF Year 2':<10} {'INF Year 3':<10}")
     print("-" * 80)
 
@@ -24,37 +37,19 @@ def display_scenario_paths():
         print(f"{name:<15} {gdp_str[0]:<10} {gdp_str[1]:<10} {gdp_str[2]:<10} {inf_str[0]:<10} {inf_str[1]:<10} {inf_str[2]:<10}")
 
 
-def display_anchor_and_test_paths(anchor_year: int, test_path: List[float]):
-    """Display anchor year and 2018-2020 test path"""
-    print(f"\nANCHOR YEAR & TEST PERIOD")
+def print_probabilities(probabilities):
+    """Print scenario probabilities"""
+    print("\n3) SCENARIO PROBABILITIES")
     print("=" * 50)
-
-    print(f"Anchor Year: {anchor_year}")
-
-    test_gdp = test_path[:3]
-    test_inf = test_path[3:]
-
-    print(f"\n2018-2020 Realized Economic Path:")
-    print(f"{'Year':<6} {'GDP Growth':<12} {'Inflation':<10}")
-    print("-" * 30)
-    print(f"{'2018':<6} {test_gdp[0]:+.1f}%{'':<7} {test_inf[0]:+.1f}%")
-    print(f"{'2019':<6} {test_gdp[1]:+.1f}%{'':<7} {test_inf[1]:+.1f}%")
-    print(f"{'2020':<6} {test_gdp[2]:+.1f}%{'':<7} {test_inf[2]:+.1f}%")
-
-
-def display_scenario_probabilities(probabilities: Dict[str, float]):
-    """Display scenario probabilities"""
-    print(f"\nSCENARIO PROBABILITIES")
-    print("=" * 30)
 
     for scenario, prob in probabilities.items():
         print(f"{scenario:<15}: {prob:6.1%}")
 
 
-def display_scenario_forecasts(forecasts: Dict[str, Dict[str, List[float]]]):
-    """Display scenario asset return forecasts"""
-    print(f"\nSCENARIO ASSET RETURN FORECASTS")
-    print("=" * 80)
+def print_forecasts(forecasts):
+    """Print asset return forecasts"""
+    print("\n4) ASSET RETURN FORECASTS")
+    print("=" * 50)
 
     for scenario, asset_forecasts in forecasts.items():
         print(f"\n{scenario}:")
@@ -63,134 +58,121 @@ def display_scenario_forecasts(forecasts: Dict[str, Dict[str, List[float]]]):
             print(f"  {asset:<8}: {returns_str[0]:<8} {returns_str[1]:<8} {returns_str[2]:<8}")
 
 
-def display_portfolio_weights(weights_results: Dict[str, List[Dict[str, float]]]):
-    """Display portfolio weights for different learning mechanisms"""
-    print(f"\nPORTFOLIO WEIGHTS BY LEARNING MECHANISM")
-    print("=" * 60)
-
-    for mechanism, weights_sequence in weights_results.items():
-        print(f"\n{mechanism}:")
-        print(f"{'Year':<6} {'Cash':<8} {'Stocks':<8} {'Bonds':<8}")
-        print("-" * 30)
-
-        for year, weights in enumerate(weights_sequence):
-            cash = weights.get('Cash', 0)
-            stocks = weights.get('Stocks', 0)
-            bonds = weights.get('Bonds', 0)
-            print(f"{year+1:<6} {cash:<8.3f} {stocks:<8.3f} {bonds:<8.3f}")
-
-
-def display_performance_analysis(performance_results: Dict[str, Dict]):
-    """Display performance analysis for different learning mechanisms"""
-    print(f"\nPERFORMANCE ANALYSIS (2018-2020)")
-    print("=" * 60)
-
-    print(f"{'Mechanism':<20} {'Cumulative Return':<18} {'Final Value':<12}")
-    print("-" * 50)
-
-    for mechanism, performance in performance_results.items():
-        cum_return = performance['cumulative_return']
-        final_value = performance['final_value']
-        print(f"{mechanism:<20} {cum_return*100:<18.2f}% {final_value:<12.3f}")
-
-    print(f"\nANNUAL RETURNS BY MECHANISM:")
-    print(f"{'Mechanism':<20} {'2018':<8} {'2019':<8} {'2020':<8}")
-    print("-" * 45)
-
-    for mechanism, performance in performance_results.items():
-        annual = performance['annual_returns']
-        print(f"{mechanism:<20} {annual[0]*100:<8.2f}% {annual[1]*100:<8.2f}% {annual[2]*100:<8.2f}%")
+def print_optimization_header(risk_aversion):
+    """Print optimization section header"""
+    print("\n5) OPTIMIZED PORTFOLIO")
+    print("=" * 50)
+    print(f"Risk Aversion Parameter (A): {risk_aversion}")
+    print(f"Utility Constraint: E[r] ≥ {0.5 * risk_aversion:.1f} × Var[r] + rf")
 
 
 def main():
-    """Main analysis function"""
+    print("SEQUENTIAL BAYESIAN PORTFOLIO OPTIMIZATION")
+    print("=" * 50)
 
-    print("GAME THEORY PORTFOLIO SELECTION - CLEAN ANALYSIS")
-    print("=" * 80)
-
-    # Initialize analyzer
-    data_path = "data/usa_macro_var_and_asset_returns.csv"
+    # Setup
+    analyzer = ScenarioAnalyzer("data/usa_macro_var_and_asset_returns.csv")
     anchor_year = 2017
+    risk_aversion = RISK_AVERSION
 
-    try:
-        analyzer = ScenarioAnalyzer(data_path)
+    # 1) Print dataset info
+    print_dataset_info(analyzer)
 
-        # Get scenario probabilities and forecasts
-        probabilities = analyzer.estimate_probabilities(anchor_year)
-        forecasts = analyzer.forecast_returns(anchor_year)
+    # 2) Print scenarios
+    print_scenarios()
 
-        # 2018-2020 actual path for out-of-sample test
-        test_path = [2.9, 2.2, -3.4, 2.4, 1.8, 1.2]  # [gdp1, gdp2, gdp3, inf1, inf2, inf3]
+    # Get initial probabilities and forecasts
+    probabilities = analyzer.estimate_probabilities(anchor_year)
+    forecasts = analyzer.forecast_returns(anchor_year)
 
-        # Actual 2018-2020 asset returns (for performance analysis)
-        actual_returns = {
-            'Cash': [2.4, 2.3, 0.6],      # Approximate 3-month Treasury rates
-            'Stocks': [-4.4, 31.5, 18.4], # S&P 500 total returns
-            'Bonds': [0.9, 8.7, 7.5]      # 10-year Treasury bond returns
+    # 3) Print probabilities
+    print_probabilities(probabilities)
+
+    # 4) Print forecasts
+    print_forecasts(forecasts)
+
+    # 5) Print optimization header
+    print_optimization_header(risk_aversion)
+
+    # Actual 2018-2020 economic path
+    actual_gdp = [2.9, 2.2, -3.4]
+    actual_inflation = [2.4, 1.8, 1.2]
+
+    # Actual asset returns for performance calculation
+    actual_returns = {
+        'Cash': [2.4, 2.3, 0.6],
+        'Stocks': [-4.4, 31.5, 18.4],
+        'Bonds': [0.9, 8.7, 7.5]
+    }
+
+    # Convert scenarios for learning
+    scenarios_dict = {
+        name: {
+            'gdp_growth': scenario.gdp_growth,
+            'inflation': scenario.inflation
+        }
+        for name, scenario in SCENARIOS.items()
+    }
+
+    # Get covariance matrix
+    covariance_matrix = analyzer._calculate_covariance_matrix(anchor_year, 0)
+
+    # Sequential optimization
+    portfolio_weights = []
+    current_beliefs = probabilities.copy()
+
+    for year in range(3):
+        print(f"\n--- YEAR {year + 1} ({2018 + year}) ---")
+
+        # Get this year's return forecasts
+        year_forecasts = {
+            scenario: {asset: forecasts[scenario][asset][year]
+                      for asset in forecasts[scenario].keys()}
+            for scenario in forecasts.keys()
         }
 
-        # Display information
-        display_scenario_paths()
-        display_anchor_and_test_paths(anchor_year, test_path)
-        display_scenario_probabilities(probabilities)
-        display_scenario_forecasts(forecasts)
+        # Show current beliefs
+        print("Current Beliefs:")
+        for scenario, prob in current_beliefs.items():
+            print(f"  {scenario:<15}: {prob:6.1%}")
 
-        # Convert scenarios to format needed by learning functions
-        scenarios_dict = {}
-        for name, scenario in SCENARIOS.items():
-            scenarios_dict[name] = {
-                'gdp_growth': scenario.gdp_growth,
-                'inflation': scenario.inflation
-            }
+        # Optimize portfolio
+        weights = optimize_portfolio(current_beliefs, year_forecasts, year, risk_aversion)
+        portfolio_weights.append(weights)
 
-        # Learning mechanisms to test
-        learning_mechanisms = {
-            'No Learning': create_learning_function('no_learning'),
-            'Adaptive (λ=0.3)': create_learning_function('adaptive', 0.3),
-            'Adaptive (λ=0.5)': create_learning_function('adaptive', 0.5),
-            'Adaptive (λ=0.7)': create_learning_function('adaptive', 0.7),
-            'Bayesian': create_learning_function('bayesian')
-        }
+        print("Optimal Weights:")
+        for asset, weight in weights.items():
+            print(f"  {asset:<8}: {weight:6.1%}")
 
-        # Get covariance matrix for learning
-        covariance_matrix = analyzer._calculate_covariance_matrix(anchor_year, 0)
+        # Update beliefs for next year (except last year)
+        if year < 2:
+            observed_gdp = actual_gdp[:year+1]
+            observed_inf = actual_inflation[:year+1]
 
-        # Calculate portfolio weights for each learning mechanism
-        weights_results = {}
+            print(f"Observed Evidence: GDP={observed_gdp}, INF={observed_inf}")
 
-        for mechanism_name, learning_function in learning_mechanisms.items():
-            weights_sequence = sequential_optimize(
-                initial_probabilities=probabilities,
-                scenario_forecasts=forecasts,
-                evidence_path=test_path,
-                learning_function=learning_function,
-                scenarios_dict=scenarios_dict,
-                covariance_matrix=covariance_matrix,
-                horizon=3
+            current_beliefs = update_beliefs(
+                current_beliefs, observed_gdp, observed_inf,
+                scenarios_dict, covariance_matrix
             )
-            weights_results[mechanism_name] = weights_sequence
 
-        # Display portfolio weights
-        display_portfolio_weights(weights_results)
+    # Calculate performance
+    portfolio_value = 1.0
+    print(f"\n--- PERFORMANCE ANALYSIS ---")
+    print("=" * 30)
 
-        # Calculate performance using actual 2018-2020 returns
-        performance_results = {}
+    for year, weights in enumerate(portfolio_weights):
+        # Annual portfolio return
+        portfolio_return = sum(
+            weights[asset] * actual_returns[asset][year] / 100.0
+            for asset in weights.keys()
+        )
+        portfolio_value *= (1 + portfolio_return)
 
-        for mechanism_name, weights_sequence in weights_results.items():
-            performance = calculate_portfolio_performance(weights_sequence, actual_returns)
-            performance_results[mechanism_name] = performance
+        print(f"Year {year+1} ({2018+year}): {portfolio_return*100:+.2f}%")
 
-        # Display performance analysis
-        display_performance_analysis(performance_results)
-
-        print(f"\n" + "=" * 80)
-        print("ANALYSIS COMPLETE")
-        print("=" * 80)
-
-    except Exception as e:
-        print(f"❌ Analysis failed: {e}")
-        import traceback
-        traceback.print_exc()
+    print(f"\nFinal Portfolio Value: ${portfolio_value:.3f}")
+    print(f"Cumulative Return: {(portfolio_value-1)*100:+.2f}%")
 
 
 if __name__ == "__main__":
