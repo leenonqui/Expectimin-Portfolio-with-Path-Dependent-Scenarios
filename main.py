@@ -6,7 +6,7 @@ Simple sequential portfolio optimization with Bayesian learning
 from optimization import optimize_portfolio
 from learning import update_beliefs
 from scenario_analysis import ScenarioAnalyzer
-from constants import SCENARIOS, RISK_AVERSION
+from constants import SCENARIOS
 
 
 def print_dataset_info(analyzer):
@@ -58,12 +58,10 @@ def print_forecasts(forecasts):
             print(f"  {asset:<8}: {returns_str[0]:<8} {returns_str[1]:<8} {returns_str[2]:<8}")
 
 
-def print_optimization_header(risk_aversion):
+def print_optimization_header():
     """Print optimization section header"""
     print("\n5) OPTIMIZED PORTFOLIO")
     print("=" * 50)
-    print(f"Risk Aversion Parameter (A): {risk_aversion}")
-    print(f"Utility Constraint: E[r] ≥ {0.5 * risk_aversion:.1f} × Var[r] + rf")
 
 
 def main():
@@ -73,7 +71,6 @@ def main():
     # Setup
     analyzer = ScenarioAnalyzer("data/usa_macro_var_and_asset_returns.csv")
     anchor_year = 2017
-    risk_aversion = RISK_AVERSION
 
     # 1) Print dataset info
     print_dataset_info(analyzer)
@@ -92,18 +89,43 @@ def main():
     print_forecasts(forecasts)
 
     # 5) Print optimization header
-    print_optimization_header(risk_aversion)
+    print_optimization_header()
 
-    # Actual 2018-2020 economic path
-    actual_gdp = [2.9, 2.2, -3.4]
-    actual_inflation = [2.4, 1.8, 1.2]
+    # Extract actual 2018-2020 economic path from data
+    actual_years = [2018, 2019, 2020]
+    actual_gdp = []
+    actual_inflation = []
 
-    # Actual asset returns for performance calculation
-    actual_returns = {
-        'Cash': [2.4, 2.3, 0.6],
-        'Stocks': [-4.4, 31.5, 18.4],
-        'Bonds': [0.9, 8.7, 7.5]
-    }
+    for year in actual_years:
+        if year in analyzer.data.index:
+            actual_gdp.append(analyzer.data.loc[year, 'gdp_growth'])
+            actual_inflation.append(analyzer.data.loc[year, 'inflation'])
+        else:
+            print(f"Warning: Year {year} not found in data")
+
+    print(f"Actual GDP growth: {actual_gdp}")
+    print(f"Actual inflation: {actual_inflation}")
+
+    # Extract actual asset returns for performance calculation from data
+    actual_returns = {'Cash': [], 'Stocks': [], 'Bonds': []}
+
+    for year in actual_years:
+        if year in analyzer.data.index:
+            # Cash returns: use bill_rate (nominal short-term rate)
+            cash_return = analyzer.data.loc[year, 'bill_rate'] * 100
+            actual_returns['Cash'].append(cash_return)
+
+            # Stock returns: use eq_tr (equity total return)
+            stock_return = analyzer.data.loc[year, 'eq_tr'] * 100
+            actual_returns['Stocks'].append(stock_return)
+
+            # Bond returns: use bond_tr (bond total return)
+            bond_return = analyzer.data.loc[year, 'bond_tr'] * 100
+            actual_returns['Bonds'].append(bond_return)
+        else:
+            print(f"Warning: Year {year} not found in data for returns")
+
+    print(f"Actual returns: {actual_returns}")
 
     # Convert scenarios for learning
     scenarios_dict = {
@@ -137,7 +159,7 @@ def main():
             print(f"  {scenario:<15}: {prob:6.1%}")
 
         # Optimize portfolio
-        weights = optimize_portfolio(current_beliefs, year_forecasts, year, risk_aversion)
+        weights = optimize_portfolio(current_beliefs, year_forecasts, year)
         portfolio_weights.append(weights)
 
         print("Optimal Weights:")

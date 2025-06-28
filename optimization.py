@@ -1,96 +1,87 @@
 """
 optimization.py
-Simple portfolio optimization with mean-variance utility constraint
+Simple Linear Programming formulation using PuLP
+Minimize expected losses with cash constraint
 """
 
-import numpy as np
-import scipy.optimize as opt
+import pulp
 from typing import Dict
-from constants import REAL_RISK_FREE_RATES, RISK_AVERSION
 
 
 def optimize_portfolio(probabilities: Dict[str, float],
                       scenario_returns: Dict[str, Dict[str, float]],
-                      year: int,
-                      risk_aversion: float = RISK_AVERSION) -> Dict[str, float]:
+                      year: int
+                    ) -> Dict[str, float]:
     """
-    Find portfolio weights that minimize expected loss
-    Subject to: E[return] ≥ ½ × A × Var[return] + risk_free_rate
+    Linear Programming: Minimize expected losses
 
-    Args:
-        probabilities: {scenario: probability}
-        scenario_returns: {scenario: {asset: return_%}}
-        year: Year index (0, 1, 2) for risk-free rate
-        risk_aversion: Risk aversion parameter A
+    Variables:
+        w_asset = weight in each asset
+        loss_scenario = loss in each scenario
 
-    Returns:
-        {asset: weight}
+    Minimize: sum(probability × loss)
+
+    Subject to:
+        sum(weights) = 1
+        0 ≤ w_cash ≤ 0.10
+        w_stocks ≥ 0.25
+        w_bonds ≥ 0
+        loss ≥ 0
+        loss ≥ -portfolio_return  (captures max(0, -return))
     """
-    # Setup
+
     scenarios = list(probabilities.keys())
     assets = list(next(iter(scenario_returns.values())).keys())
-    n_assets = len(assets)
 
-    # Convert to arrays
-    probs = np.array([probabilities[s] for s in scenarios])
-    returns_matrix = np.array([[scenario_returns[s][asset]/100.0 for asset in assets]
-                              for s in scenarios])
+    # Create LP problem
+    prob = pulp.LpProblem("Portfolio_Optimization", pulp.LpMinimize)
 
-    # Get risk-free rate
-    rf_year = 2018 + year
-    risk_free_rate = REAL_RISK_FREE_RATES.get(rf_year, 0.0)
+    # Variables: Portfolio weights
+    weights = {}
+    for asset in assets:
+        if asset == 'Cash':
+            weights[asset] = pulp.LpVariable(f"w_{asset}", lowBound=0, upBound=0.10)
+        elif asset == 'Stocks':
+            weights[asset] = pulp.LpVariable(f"w_{asset}", lowBound=0.25)
+        else:
+            weights[asset] = pulp.LpVariable(f"w_{asset}", lowBound=0)
 
-    def objective_and_constraint(weights):
-        """Calculate expected loss and utility"""
-        weights = np.array(weights)
+    # Variables: Loss in each scenario
+    losses = {}
+    for scenario in scenarios:
+        losses[scenario] = pulp.LpVariable(f"loss_{scenario}", lowBound=0)
 
-        # Portfolio returns for each scenario
-        portfolio_returns = returns_matrix @ weights
+    # Objective: Minimize expected loss
+    prob += pulp.lpSum([probabilities[s] * losses[s] for s in scenarios])
 
-        # Expected return and variance
-        expected_return = probs @ portfolio_returns
-        variance = probs @ ((portfolio_returns - expected_return) ** 2)
+    # Constraint: Weights sum to 1
+    prob += pulp.lpSum([weights[asset] for asset in assets]) == 1
 
-        # Expected loss (objective)
-        losses = np.maximum(0, -portfolio_returns)
-        expected_loss = probs @ losses
+    # Constraint: Define losses for each scenario
+    for scenario in scenarios:
+        portfolio_return = pulp.lpSum([
+            weights[asset] * scenario_returns[scenario][asset] / 100.0
+            for asset in assets
+        ])
+        # loss ≥ -portfolio_return (captures max(0, -return))
+        prob += losses[scenario] >= -portfolio_return
 
-        # Utility constraint: E[r] - ½×A×Var[r] - rf ≥ 0
-        utility = expected_return - 0.5 * risk_aversion * variance -risk_free_rate
+    # Solve
+    prob.solve(pulp.PULP_CBC_CMD(msg=0))
 
-        return expected_loss, utility
+    # Extract results
+    if prob.status == pulp.LpStatusOptimal:
+        result = {}
+        for asset in assets:
+            result[asset] = weights[asset].varValue
 
-    def objective(weights):
-        expected_loss, _ = objective_and_constraint(weights)
-        return expected_loss
+        # Normalize (ensure sum = 1)
+        total = sum(result.values())
+        for asset in assets:
+            result[asset] /= total
 
-    def utility_constraint(weights):
-        _, utility = objective_and_constraint(weights)
-        return utility
+        return result
 
-    # Constraints and bounds
-    constraints = [
-        {'type': 'ineq', 'fun': utility_constraint},  # Utility ≥ 0
-        {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}  # Weights sum to 1
-    ]
-    bounds = [(0.0, 1.0) for _ in range(n_assets)]
-
-    # Solve optimization
-    x0 = np.ones(n_assets) / n_assets  # Equal weights start
-
-    result = opt.minimize(
-        objective,
-        x0,
-        method='SLSQP',
-        bounds=bounds,
-        constraints=constraints,
-        options={'maxiter': 1000}
-    )
-
-    # Return results
-    if result.success:
-        weights_array = result.x / np.sum(result.x)  # Normalize
-        return {assets[i]: weights_array[i] for i in range(n_assets)}
     else:
-        # Fallback to equal weights
-        return {asset: 1.0/n_assets for asset in assets}
+        # Fallback to simple allocation
+        return {'Cash': 0.10, 'Stocks': 0.45, 'Bonds': 0.45}
