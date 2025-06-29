@@ -177,12 +177,6 @@ class ScenarioAnalyzer:
             self.data['bill_rr'] = cash_real
 
         anchor_cash_real = self.current_rate
-        print(f"Debug: Anchor year ({anchor_year}) cash real rate: {anchor_cash_real:.2f}%")
-
-        # Debug: Check historical return data structure
-        print(f"Debug: Historical paths shape: {hist_paths.shape}")
-        print(f"Debug: Historical returns shape: {hist_returns.shape}")
-        print(f"Debug: Expected returns shape: (n_obs, {3 * self.horizon}) for 3 assets × {self.horizon} years")
 
         # Forecast for each scenario
         forecasts = {}
@@ -199,8 +193,6 @@ class ScenarioAnalyzer:
             # Select top percentile most relevant observations
             n_top = max(1, int(len(relevances) * top_percentile))
             top_indices = np.argsort(relevances)[-n_top:]
-
-            print(f"Debug: Scenario {scenario_name} - Using top {n_top} out of {len(relevances)} observations")
 
             # Apply partial sample regression to the entire return vector
             # hist_returns shape: (n_observations, 9)
@@ -220,11 +212,6 @@ class ScenarioAnalyzer:
 
             # Predicted return vector
             y_hat = y_bar + weighted_sum / (2 * n_top)  # Shape: (9,)
-
-            # Debug output for first scenario
-            if scenario_name == list(self.scenarios.keys())[0]:
-                print(f"Debug: y_bar (top {n_top} avg): {y_bar[:3]} (cash changes)")
-                print(f"Debug: y_hat (predicted): {y_hat[:3]} (cash changes)")
 
             # Extract asset-specific forecasts from predicted vector
             # 0:3 = interest rate changes (cash)
@@ -264,14 +251,6 @@ class ScenarioAnalyzer:
                 bond_forecasts.append(bond_total)
 
             scenario_forecasts['Bonds'] = bond_forecasts
-
-            # Debug output for first scenario
-            if scenario_name == list(self.scenarios.keys())[0]:
-                print(f"Debug: Cash levels: {[f'{x:.2f}%' for x in cash_levels]}")
-                print(f"Debug: Stock excess: {[f'{x:.2f}%' for x in stock_excess]}")
-                print(f"Debug: Bond excess: {[f'{x:.2f}%' for x in bond_excess]}")
-                print(f"Debug: Final stocks: {[f'{x:.2f}%' for x in stock_forecasts]}")
-                print(f"Debug: Final bonds: {[f'{x:.2f}%' for x in bond_forecasts]}")
 
             forecasts[scenario_name] = scenario_forecasts
 
@@ -313,18 +292,7 @@ class ScenarioAnalyzer:
                 asset_paths.append(asset_vector)
 
             except (KeyError, IndexError) as e:
-                print(f"Debug: Skipping window {year}-{window_end}: {e}")
+                print(f"Skipping window {year}-{window_end}: {e}")
                 continue
-
-        print(f"Debug: Generated {len(macro_paths)} historical paths")
-        print(f"Debug: Expected paths from {start_year} to {end_year - self.horizon + 1}: {end_year - self.horizon + 1 - start_year + 1}")
-
-        if len(asset_paths) > 0:
-            print(f"Debug: Macro path shape: {np.array(macro_paths).shape} (expected: n_paths × 6)")
-            print(f"Debug: Asset path shape: {np.array(asset_paths).shape} (expected: n_paths × 9)")
-
-            # Show sample path
-            print(f"Debug: Sample macro path: {macro_paths[0]}")
-            print(f"Debug: Sample asset path: {asset_paths[0]}")
 
         return np.array(macro_paths), np.array(asset_paths)
