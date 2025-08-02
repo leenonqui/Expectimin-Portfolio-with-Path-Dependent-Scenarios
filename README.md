@@ -24,50 +24,21 @@ pip install -r requirements.txt
 
 ## Requirements
 
-- Python 3.8+
-- pandas >= 1.3.0
-- numpy >= 1.20.0
-- scipy >= 1.7.0
-- pydantic >= 1.8.0
-- matplotlib
-- seaborn
-- jupyterlab
+Core dependencies for expectimin portfolio optimization
+pandas>=1.3.0
+numpy>=1.20.0
+scipy>=1.7.0
+pulp
 
-## Quick Start
+Data validation and modeling
+pydantic>=1.8.0
 
-```python
-from scenario_analysis import ScenarioAnalyzer
-from portfolio_optimization import ExpectiminOptimizer
+Visualization and analysis
+matplotlib>=3.3.0
+seaborn>=0.11.0
 
-# Initialize analyzer with historical data
-analyzer = ScenarioAnalyzer("data/usa_macro_var_and_asset_returns.csv")
-
-# Estimate scenario probabilities for 2020 prediction
-probabilities = analyzer.estimate_probabilities(anchor_year=2019)
-
-# View scenario probabilities
-print("Scenario Probabilities:")
-for scenario, prob in probabilities.items():
-    print(f"  {scenario}: {prob:.1%}")
-
-# Forecast asset returns for each scenario
-forecasts = analyzer.forecast_returns(anchor_year=2019)
-
-# Optimize portfolio to minimize expected cumulative loss
-optimizer = ExpectiminOptimizer()
-result = optimizer.optimize_expectimin_cumulative_loss(
-    scenario_forecasts=forecasts,
-    probabilities=probabilities,
-    min_return=0.04  # 4% minimum expected return
-)
-
-# View optimal portfolio
-if result['success']:
-    print(f"\nOptimal Portfolio:")
-    for asset, weight in result['weights'].items():
-        print(f"  {asset}: {weight:.1%}")
-    print(f"Expected Loss: {result['expected_cumulative_loss']:.2%}")
-```
+Development and analysis environment
+jupyterlab>=3.0.0
 
 ## Methodology
 
@@ -116,33 +87,26 @@ Expectimin framework minimizing expected cumulative loss:
 
 ```
 minimize: E[Loss] = Σ P(s) × max(0, -CumulativeReturn_s)
-subject to: E[Return] ≥ minimum_required_return
-            Σ weights = 1
+subject to: Σ weights = 1
             weights ≥ 0
+            cash ≤ .1
+            stocks ≥ .25
 ```
-
-**Key Features:**
-- Accounts for weight drift over time (no rebalancing)
-- Handles non-convex cumulative returns
-- Uses scipy optimization for robust solving
 
 ## Project Structure
 
 ```
 expectimin-portfolio/
 ├── main.py                    # Main analysis pipeline
+├── learning.py                # Bayesian Learning for belief updating
 ├── scenario_analysis.py       # ScenarioAnalyzer class
-├── portfolio_optimization.py  # ExpectiminOptimizer class
+├── optimization.py  # ExpectiminOptimizer class
 ├── constants.py              # Scenario definitions and parameters
 ├── utils.py                  # Mathematical utility functions
 ├── requirements.txt          # Python dependencies
 ├── .gitignore               # Git ignore patterns
 ├── data/
-│   └── usa_macro_var_and_asset_returns.csv  # Historical data
-└── thesis_results/          # Output directory
-    ├── portfolio_results.csv
-    ├── scenario_probabilities.csv
-    └── return_forecasts.csv
+    └── usa_macro_var_and_asset_returns.csv  # Historical data
 ```
 
 ## Data Requirements
@@ -162,16 +126,6 @@ year,rgdpmad,cpi,bill_rate,eq_tr,bond_tr
 ...
 ```
 
-## Key Classes
-
-### ScenarioAnalyzer
-- `estimate_probabilities(anchor_year)`: Calculate scenario probabilities
-- `forecast_returns(anchor_year)`: Forecast asset returns using PSR
-
-### ExpectiminOptimizer  
-- `optimize_expectimin_cumulative_loss()`: Minimize expected cumulative loss
-- `calculate_cumulative_return_with_drift()`: Handle weight drift over time
-
 ## Running the Analysis
 
 Execute the complete analysis pipeline:
@@ -181,27 +135,10 @@ python main.py
 ```
 
 This will:
-1. Estimate scenario probabilities based on 2019 anchor year
+1. Estimate scenario probabilities based on 2015-17 anchor path
 2. Forecast 3-year asset returns for each scenario
-3. Optimize portfolios for different minimum return requirements
-4. Save results to `thesis_results/` directory
+3. Optimize portfolios under expectimin selection rule
 
-## Output Files
-
-- **portfolio_results.csv**: Optimal allocations and performance metrics
-- **scenario_probabilities.csv**: Estimated probabilities for each scenario
-- **return_forecasts.csv**: Asset return forecasts by scenario and year
-
-## Configuration
-
-Key parameters can be modified in `constants.py`:
-
-```python
-HORIZON = 3                    # Investment horizon (years)
-PSR_TOP_PERCENTILE = 0.25     # Top 25% most relevant observations
-RISK_FREE_RATE = 0.0152       # 3-year Treasury rate (Jan 2, 2020)
-CURRENT_INTEREST_RATE = 0.0154 # 3-month Treasury rate
-```
 
 ## Mathematical Framework
 
